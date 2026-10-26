@@ -1,5 +1,4 @@
 .venv/
-input.txt
 __pycache__/
 *.bin
 *.pkl

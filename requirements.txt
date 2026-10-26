@@ -1,6 +1,5 @@
 torch
 numpy
-requests
 transformers
 datasets
 tqdm
