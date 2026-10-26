@@ -14,6 +14,7 @@ complexity and having to prepend config. to every single variable. If someone
 comes up with a better simple Python solution I am all ears.
 """
 
+import os
 import sys
 from ast import literal_eval
 
@@ -22,6 +23,9 @@ for arg in sys.argv[1:]:
         # assume it's the name of a config file
         assert not arg.startswith('--')
         config_file = arg
+        # name the run after the config file, e.g. config/rope.py -> out/rope; the file can still override
+        run_name = os.path.splitext(os.path.basename(config_file))[0]
+        out_dir, wandb_run_name = os.path.join('out', run_name), run_name
         print(f"Overriding config with {config_file}:")
         with open(config_file) as f:
             print(f.read())
