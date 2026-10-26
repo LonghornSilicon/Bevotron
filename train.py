@@ -26,7 +26,7 @@ from model import GPTConfig, GPT
 # -----------------------------------------------------------------------------
 # default config values: TinyStories-28M (GPT-Neo) trained from scratch on TinyStories
 # I/O
-out_dir = 'out-tinystories-28m'
+out_dir = 'out/default' # a config file sets this to out/<config name>, see configurator.py
 eval_interval = 500
 log_interval = 10
 eval_iters = 100
@@ -35,8 +35,8 @@ always_save_checkpoint = False # if True, always save a checkpoint after each ev
 init_from = 'scratch' # 'scratch' or 'resume' or a Hugging Face GPT-Neo, e.g. 'roneneldan/TinyStories-28M'
 # wandb logging
 wandb_log = False # disabled by default
-wandb_project = 'tinystories'
-wandb_run_name = 'tinystories-28m'
+wandb_project = 'bevotron'
+wandb_run_name = 'default' # a config file sets this to its name
 # data
 dataset = 'tinystories'
 gradient_accumulation_steps = 2 # used to simulate larger batch sizes
@@ -49,6 +49,10 @@ n_embd = 512
 max_positions = 2048 # rows in the position table, can be longer than block_size
 window_size = 256 # attention span of the local layers
 dropout = 0.0 # for pretraining 0 is good, for finetuning try 0.1+
+# experiment switches, see GPTConfig in model.py; the defaults are GPT-Neo
+pos_emb = 'learned' # 'learned' or 'rope'
+attn_scale = False # scale attention scores by 1/sqrt(head_dim)
+quant = 'none' # quantization-aware training, e.g. 'int8', 'int4_g64'
 # adamw optimizer (our choice; the original TinyStories recipe is not published in full)
 learning_rate = 6e-4 # max learning rate
 max_iters = 20000 # total number of training iterations, ~330M tokens, ~0.7 epoch
@@ -64,6 +68,7 @@ min_lr = 6e-5 # minimum learning rate, should be ~= learning_rate/10 per Chinchi
 # DDP settings
 backend = 'nccl' # 'nccl', 'gloo', etc.
 # system
+seed = 1337 # change it to measure run-to-run noise
 device = 'cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu'
 dtype = 'bfloat16' if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else 'float16' # 'float32', 'bfloat16', or 'float16', the latter will auto implement a GradScaler
 compile = torch.cuda.is_available() # use PyTorch 2.0 to compile the model to be faster
@@ -98,7 +103,7 @@ print(f"tokens per iteration will be: {tokens_per_iter:,}")
 
 if master_process:
     os.makedirs(out_dir, exist_ok=True)
-torch.manual_seed(1337 + seed_offset)
+torch.manual_seed(seed + seed_offset)
 torch.backends.cuda.matmul.allow_tf32 = True # allow tf32 on matmul
 torch.backends.cudnn.allow_tf32 = True # allow tf32 on cudnn
 device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
@@ -144,7 +149,8 @@ if os.path.exists(meta_path):
 
 # model init
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, max_positions=max_positions,
-                  window_size=window_size, vocab_size=None, dropout=dropout)
+                  window_size=window_size, vocab_size=None, dropout=dropout,
+                  pos_emb=pos_emb, attn_scale=attn_scale, quant=quant)
 if init_from == 'scratch':
     # init a new model from scratch
     print("Initializing a new model from scratch")
@@ -159,11 +165,8 @@ elif init_from == 'resume':
     # resume training from a checkpoint
     ckpt_path = os.path.join(out_dir, 'ckpt.pt')
     checkpoint = torch.load(ckpt_path, map_location=device)
-    checkpoint_model_args = checkpoint['model_args']
-    # force these config attributes to be equal otherwise we can't even resume training
-    # the rest of the attributes (e.g. dropout) can stay as desired from command line
-    for k in ['n_layer', 'n_head', 'n_embd', 'max_positions', 'window_size', 'vocab_size']:
-        model_args[k] = checkpoint_model_args[k]
+    # the architecture comes from the checkpoint, only dropout can change from the command line
+    model_args.update({k: v for k, v in checkpoint['model_args'].items() if k != 'dropout'})
     # create the model
     gptconf = GPTConfig(**model_args)
     model = GPT(gptconf)
@@ -179,7 +182,8 @@ elif init_from == 'resume':
     best_val_loss = checkpoint['best_val_loss']
 else:
     print(f"Initializing from Hugging Face weights: {init_from}")
-    model = GPT.from_pretrained(init_from, dropout=dropout)
+    assert pos_emb == 'learned' and not attn_scale, "published GPT-Neo weights need the default pos_emb and attn_scale"
+    model = GPT.from_pretrained(init_from, dict(dropout=dropout, quant=quant))
     # read off created config params, so we can store them into checkpoint correctly
     model_args = asdict(model.config)
 model.to(device)

@@ -2,5 +2,5 @@
 __pycache__/
 *.bin
 *.pkl
-out-*/
+out/
 *.log

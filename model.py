@@ -5,6 +5,7 @@ TinyStories checkpoints (roneneldan/TinyStories-*). Differences from GPT-2:
 1) layers alternate global and local (sliding-window) causal self-attention
 2) attention scores are not scaled by 1/sqrt(head_dim)
 3) the q/k/v projections have no bias
+Experiments switch parts of it via GPTConfig; the defaults are exactly GPT-Neo.
 References:
 1) the official GPT-Neo release by EleutherAI:
 https://github.com/EleutherAI/gpt-neo
@@ -19,44 +20,66 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from quant import QuantLinear
+
+def Linear(config, in_features, out_features, bias=True):
+    # quantization-aware training swaps in a Linear that sees fake-quantized weights
+    if config.quant == 'none':
+        return nn.Linear(in_features, out_features, bias=bias)
+    return QuantLinear(in_features, out_features, bias=bias, fmt=config.quant)
+
+def rope_cos_sin(T, head_dim, device):
+    # rotary position embedding angles for positions 0..T-1, base 10000 as in RoFormer / Llama
+    inv_freq = 1.0 / (10000 ** (torch.arange(0, head_dim, 2, device=device).float() / head_dim))
+    angles = torch.outer(torch.arange(T, device=device).float(), inv_freq) # (T, hs/2)
+    return angles.cos(), angles.sin()
+
+def apply_rope(x, cos, sin):
+    # rotate the pairs (x[..., i], x[..., i + hs/2]) of x (B, nh, T, hs) by their position's angle
+    x1, x2 = x.float().chunk(2, dim=-1)
+    return torch.cat([x1 * cos - x2 * sin, x1 * sin + x2 * cos], dim=-1).type_as(x)
+
 class CausalSelfAttention(nn.Module):
 
     def __init__(self, config, local):
         super().__init__()
         assert config.n_embd % config.n_head == 0
         # query, key, value projections for all heads, no bias
-        self.q_proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.k_proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
-        self.v_proj = nn.Linear(config.n_embd, config.n_embd, bias=False)
+        self.q_proj = Linear(config, config.n_embd, config.n_embd, bias=False)
+        self.k_proj = Linear(config, config.n_embd, config.n_embd, bias=False)
+        self.v_proj = Linear(config, config.n_embd, config.n_embd, bias=False)
         # output projection
-        self.out_proj = nn.Linear(config.n_embd, config.n_embd, bias=True)
+        self.out_proj = Linear(config, config.n_embd, config.n_embd, bias=True)
         # regularization
         self.resid_dropout = nn.Dropout(config.dropout)
         self.n_head = config.n_head
         self.dropout = config.dropout
+        # GPT-Neo uses unscaled scores; None means SDPA's default 1/sqrt(hs)
+        self.scale = None if config.attn_scale else 1.0
         # local layers only see the previous window_size tokens (themselves included)
         self.window_size = config.window_size if local else None
 
-    def forward(self, x):
+    def forward(self, x, rope=None):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         q = self.q_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         k = self.k_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
         v = self.v_proj(x).view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        if rope is not None:
+            q, k = apply_rope(q, *rope), apply_rope(k, *rope)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
-        # scale=1.0 because GPT-Neo does not scale the scores by 1/sqrt(hs)
         dropout_p = self.dropout if self.training else 0
         if self.window_size is None or T <= self.window_size:
             # global layer, or a window that covers the whole sequence: plain causal, flash attention
-            y = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p, is_causal=True, scale=1.0)
+            y = F.scaled_dot_product_attention(q, k, v, dropout_p=dropout_p, is_causal=True, scale=self.scale)
         else:
             # local layer: query i attends to keys j with i - window_size < j <= i
             i = torch.arange(T, device=x.device)
             dist = i[:, None] - i[None, :]
             mask = (dist >= 0) & (dist < self.window_size)
-            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout_p, scale=1.0)
+            y = F.scaled_dot_product_attention(q, k, v, attn_mask=mask, dropout_p=dropout_p, scale=self.scale)
         y = y.transpose(1, 2).contiguous().view(B, T, C) # re-assemble all head outputs side by side
 
         # output projection
@@ -67,9 +90,9 @@ class MLP(nn.Module):
 
     def __init__(self, config):
         super().__init__()
-        self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd)
+        self.c_fc    = Linear(config, config.n_embd, 4 * config.n_embd)
         self.gelu    = nn.GELU(approximate='tanh') # "gelu_new" in Hugging Face
-        self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd)
+        self.c_proj  = Linear(config, 4 * config.n_embd, config.n_embd)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
@@ -88,8 +111,8 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(config.n_embd)
         self.mlp = MLP(config)
 
-    def forward(self, x):
-        x = x + self.attn(self.ln_1(x))
+    def forward(self, x, rope=None):
+        x = x + self.attn(self.ln_1(x), rope)
         x = x + self.mlp(self.ln_2(x))
         return x
 
@@ -103,21 +126,27 @@ class GPTConfig:
     n_embd: int = 512
     window_size: int = 256 # attention span of the local layers
     dropout: float = 0.0
+    # experiment switches; the defaults are GPT-Neo
+    pos_emb: str = 'learned' # 'learned' position table (GPT-Neo) or 'rope'
+    attn_scale: bool = False # scale attention scores by 1/sqrt(head_dim), as most models do
+    quant: str = 'none' # quantization-aware training of the block weights, e.g. 'int4_g64' (see quant.py)
 
 class GPT(nn.Module):
 
     def __init__(self, config):
         super().__init__()
+        assert config.pos_emb in ('learned', 'rope')
         self.config = config
 
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd),
-            wpe = nn.Embedding(config.max_positions, config.n_embd),
             drop = nn.Dropout(config.dropout),
             # even layers are global, odd layers are local
             h = nn.ModuleList([Block(config, local=(i % 2 == 1)) for i in range(config.n_layer)]),
             ln_f = nn.LayerNorm(config.n_embd),
         ))
+        if config.pos_emb == 'learned':
+            self.transformer.wpe = nn.Embedding(config.max_positions, config.n_embd)
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
         self.transformer.wte.weight = self.lm_head.weight # https://paperswithcode.com/method/weight-tying
 
@@ -138,15 +167,19 @@ class GPT(nn.Module):
     def forward(self, idx, targets=None):
         device = idx.device
         b, t = idx.size()
-        assert t <= self.config.max_positions, f"Cannot forward sequence of length {t}, max_positions is only {self.config.max_positions}"
-        pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
 
         # forward the GPT-Neo model itself
-        tok_emb = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
-        pos_emb = self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
-        x = self.transformer.drop(tok_emb + pos_emb)
+        x = self.transformer.wte(idx) # token embeddings of shape (b, t, n_embd)
+        rope = None
+        if self.config.pos_emb == 'learned':
+            assert t <= self.config.max_positions, f"Cannot forward sequence of length {t}, max_positions is only {self.config.max_positions}"
+            pos = torch.arange(0, t, dtype=torch.long, device=device) # shape (t)
+            x = x + self.transformer.wpe(pos) # position embeddings of shape (t, n_embd)
+        else:
+            rope = rope_cos_sin(t, self.config.n_embd // self.config.n_head, device)
+        x = self.transformer.drop(x)
         for block in self.transformer.h:
-            x = block(x)
+            x = block(x, rope)
         x = self.transformer.ln_f(x)
 
         if targets is not None:
@@ -161,8 +194,11 @@ class GPT(nn.Module):
         return logits, loss
 
     @classmethod
-    def from_pretrained(cls, model_type, dropout=0.0):
+    def from_pretrained(cls, model_type, override_args=None):
         """Load GPT-Neo weights from the Hugging Face hub, e.g. 'roneneldan/TinyStories-28M'."""
+        override_args = override_args or {} # default to empty dict
+        # only dropout and quantization-aware training can change on top of published weights
+        assert all(k in ('dropout', 'quant') for k in override_args)
         from transformers import GPTNeoForCausalLM
         print("loading weights from pretrained gpt-neo: %s" % model_type)
         model_hf = GPTNeoForCausalLM.from_pretrained(model_type)
@@ -173,7 +209,7 @@ class GPT(nn.Module):
         assert c.layer_norm_epsilon == 1e-5
         config = GPTConfig(vocab_size=c.vocab_size, max_positions=c.max_position_embeddings,
                            n_layer=c.num_layers, n_head=c.num_heads, n_embd=c.hidden_size,
-                           window_size=c.window_size, dropout=dropout)
+                           window_size=c.window_size, **override_args)
         model = GPT(config)
         # parameter names match Hugging Face's, except attention is one module shallower
         sd_hf = {k.replace('.attn.attention.', '.attn.'): v for k, v in model_hf.state_dict().items()}
