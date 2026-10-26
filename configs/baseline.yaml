@@ -13,8 +13,10 @@ data:
   dataset: tinystories
 train:
   tokens: 504M            # 20 tokens/param for the 25.2M baseline (Chinchilla)
-  batch_tokens: 16384
-  lr: 6.0e-4
+  #batch_tokens: 16384 - for 12 GB laptop GPU
+  batch_tokens: 131072 # for data-center GPU (~3,850 steps), 8x batch_tokens for laptop GPU
+  #lr: 6.0e-4 - for 12 GB laptop GPU
+  lr: 1.2e-3 # scaled with the batch; 6.0e-4 at 16384, 2x lr for laptop GPU
   warmup_frac: 0.05
   min_lr_ratio: 0.1
   weight_decay: 0.1
