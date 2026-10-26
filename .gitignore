@@ -1,7 +1,8 @@
 .venv/
-input.txt
 __pycache__/
+*.egg-info/
+runs/
+data/cache/
+artifacts/
 *.bin
-*.pkl
-out-*/
-*.log
+*.pt

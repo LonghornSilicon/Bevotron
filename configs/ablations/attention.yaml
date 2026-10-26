@@ -1,0 +1,4 @@
+name: attention
+question: Can heads share KV?
+grid:
+  model.n_kv_head: [4, 1]   # GQA, MQA

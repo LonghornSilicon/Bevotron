@@ -1,0 +1,5 @@
+name: hidden_dim
+question: How narrow can we go?
+pairs:
+  - {model.d_model: 256, model.n_head: 8,  model.n_kv_head: 8}
+  - {model.d_model: 384, model.n_head: 12, model.n_kv_head: 12}

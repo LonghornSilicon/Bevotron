@@ -1,0 +1,4 @@
+name: vocab_size
+question: How small can vocab go?
+grid:
+  tokenizer.vocab_size: [4000, 8000, 12000, 16000, 25000]

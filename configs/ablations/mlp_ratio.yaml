@@ -1,0 +1,4 @@
+name: mlp_ratio
+question: How thin can the MLP be?
+grid:
+  model.mlp_ratio: [2, 3]

@@ -1,0 +1,25 @@
+# The shared baseline. The only complete config; every ablation overrides a few keys.
+model:
+  preset: bevo            # bevo | llama: defaults for norm, positions, MLP activation
+  n_layer: 8
+  d_model: 512
+  n_head: 16
+  n_kv_head: 16           # 16 = MHA, 4 = GQA, 1 = MQA
+  mlp_ratio: 4
+  context_len: 512
+tokenizer:
+  vocab_size: 50000       # TinyStories-trained BPE; smaller sizes are truncations of it
+data:
+  dataset: tinystories
+train:
+  tokens: 504M            # 20 tokens/param for the 25.2M baseline (Chinchilla)
+  batch_tokens: 16384
+  lr: 6.0e-4
+  warmup_frac: 0.05
+  min_lr_ratio: 0.1
+  weight_decay: 0.1
+  seed: 1337
+quant:
+  scheme: int8            # none | int8 | w4a8 | w4a4 | w4a8kv4
+eval:
+  metrics: [bpb, memory]
