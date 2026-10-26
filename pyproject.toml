@@ -1,0 +1,38 @@
+[project]
+name = "bevotron"
+version = "0.1.0"
+description = "Longhorn Silicon's small-scale LLM training pipeline for pre-training and post-training."
+requires-python = ">=3.12"
+dependencies = [
+    "pyyaml>=6.0",
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+train = ["torch>=2.5", "datasets>=3.0", "tqdm>=4.66"]
+judge = ["anthropic>=0.40"]
+
+[project.scripts]
+bevotron = "bevotron.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff==0.16.5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/bevotron"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

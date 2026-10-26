@@ -1,0 +1,7 @@
+name: precision
+question: How low can precision go?
+# Order matters: the PTQ row reuses the baseline checkpoint; the QAT row fine-tunes from it.
+pairs:
+  - {quant.scheme: w4a4kv4, quant.mode: ptq}
+  - {quant.scheme: w4a4kv4, quant.mode: qat}
+# add e.g. {quant.scheme: w4a8kv4, quant.mode: ptq} to compare against 8-bit activations

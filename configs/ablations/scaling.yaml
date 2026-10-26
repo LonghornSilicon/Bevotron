@@ -1,0 +1,11 @@
+# Size x data sweep: each width (8 layers, head size 32) at several token budgets.
+name: scaling
+question: Best size for our data?
+pairs:                     # one entry per model size; head count keeps head size at 32
+  - {model.d_model: 128, model.n_head: 4,  model.n_kv_head: 4}
+  - {model.d_model: 192, model.n_head: 6,  model.n_kv_head: 6}
+  - {model.d_model: 256, model.n_head: 8,  model.n_kv_head: 8}
+  - {model.d_model: 352, model.n_head: 11, model.n_kv_head: 11}
+  - {model.d_model: 512, model.n_head: 16, model.n_kv_head: 16}
+grid:                      # crossed with every pair above
+  train.tokens: [31M, 62M, 125M, 250M, 500M]
