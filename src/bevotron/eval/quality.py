@@ -25,6 +25,17 @@ def perplexity(val_loss_nats: float) -> float:
     return math.exp(val_loss_nats)
 
 
+# Windows scored per forward pass in the full validation pass. Independent of the training
+# batch: the loss is a mean over every token either way, and the logits for a 131K-token
+# batch at a 50k vocabulary are 26 GB, more than a laptop GPU holds.
+EVAL_BATCH_TOKENS = 16_384
+
+
+def eval_batch_size(context_len: int, batch_tokens: int) -> int:
+    """Windows per eval forward pass: the training batch, capped at EVAL_BATCH_TOKENS."""
+    return max(1, min(batch_tokens, EVAL_BATCH_TOKENS) // context_len)
+
+
 def full_val_loss(model, data, context_len: int, batch_size: int, device: str) -> float:
     """Mean cross-entropy over the whole validation array, in non-overlapping windows."""
     import numpy as np
@@ -71,7 +82,7 @@ def evaluate_run(config: RunConfig, run_dir: Path, device: str = "cpu") -> dict:
     ckpt = torch.load(run_dir / "ckpt.pt", map_location=device)
     model = Bevo(config).to(device)
     model.load_state_dict(ckpt["model"])
-    batch = max(1, config.train.batch_tokens // config.model.context_len)
+    batch = eval_batch_size(config.model.context_len, config.train.batch_tokens)
 
     fp_loss = full_val_loss(model, val, config.model.context_len, batch, device)
     result = {

@@ -3,7 +3,7 @@ from pathlib import Path
 
 from bevotron.config import RunConfig, apply_overrides, load_raw
 from bevotron.eval.memory import memory
-from bevotron.eval.quality import bits_per_byte, perplexity
+from bevotron.eval.quality import bits_per_byte, eval_batch_size, perplexity
 
 BASELINE = Path(__file__).resolve().parents[1] / "configs" / "baseline.yaml"
 
@@ -32,3 +32,12 @@ def test_bits_per_byte_worked_example():
     b = bits_per_byte(1.2, 8, 12)
     assert round(a, 2) == 0.96 and round(b, 2) == 1.15 and a < b
     assert math.isclose(perplexity(math.log(24)), 24)
+
+
+def test_eval_batch_is_capped_for_large_training_batches():
+    # 131K-token training batch at context 512: 256 windows would need 26 GB of logits at a
+    # 50k vocabulary; eval scores 32 windows at a time instead. Small batches are unchanged.
+    assert eval_batch_size(512, 131_072) == 32
+    assert eval_batch_size(512, 16_384) == 32
+    assert eval_batch_size(128, 4_096) == 32
+    assert eval_batch_size(512, 256) == 1
