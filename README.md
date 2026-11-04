@@ -7,7 +7,7 @@ One shared baseline config, one small file per study, one command to turn a stud
 ## Setup 
 
     uv sync --extra train
-    uv run pytest                                            # 52 tests to make sure everything works
+    uv run pytest                                            # 54 tests to make sure everything works
     uv run bevotron data export                              # TinyStories train split -> data/tinystories/train.txt
     uv run bevotron tokenizer train --vocab-size 50000       # artifacts/tokenizer/tokenizer_50k.json
     uv run bevotron tokenizer truncate --input artifacts/tokenizer/tokenizer_50k.json --sizes 25000 16000 12000 8000 4000
@@ -71,12 +71,27 @@ multiple of `n_kv_head` (use `pairs` to change both together).
 
 `bevotron compare <study>` writes all of these plus deltas vs the baseline to `results/<study>.csv`.
 
-## Quantization (`configs/ablations/precision.yaml`, W4A4KV4)
+## Quantization (`configs/ablations/precision.yaml`: W4A4KV4 PTQ and QAT, W4A8KV4 PTQ)
 
-Train the baseline first. The PTQ row shares its training key, so `bevotron run` reuses the
+Train the baseline first. The PTQ rows share its training key, so `bevotron run` reuses the
 checkpoint and only evaluates; the QAT row loads that checkpoint, turns on fake quantization
 with a straight-through estimator, and fine-tunes for `quant.qat_tokens` at `quant.qat_lr`.
-`bevotron sample <id> --quant` shows what the scheme does to the text.
+Weights get one scale per output channel, activations and the KV cache one scale per token
+(per head). `bevotron sample <id> --quant` shows what the scheme does to the text.
+
+A run ID hashes the whole config, so a study only lands on an already-trained baseline if it
+expands against that run's saved config. The trained baseline used the 16K-batch laptop
+settings, so the precision study is expanded with
+`--baseline runs/<baseline-id>/config.yaml` (see the comment in the study file).
+
+## Vocabulary (`configs/ablations/vocab_size.yaml`)
+
+Every run trains from scratch, so run this study on a data-center GPU with the 131K-batch
+baseline. Compare runs by bits per byte, not perplexity. The study holds the amount of text
+fixed rather than the token count: a smaller vocabulary spends more tokens per story, so each
+row's `train.tokens` is the baseline budget scaled by that tokenizer's train-split token count
+(the numbers and the formula are in the study file; regenerate them after retraining the
+tokenizer or changing the baseline budget).
 
 ## Layout
 
