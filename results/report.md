@@ -14,22 +14,32 @@ Memory = non-embedding weights + KV cache at the scheme's precision, 512-token c
 
 ## Vocabulary size (ranked by bits per byte; lower is better)
 
-Each run trains from scratch on the 131K-batch baseline config with the amount of text held
-fixed (see configs/ablations/vocab_size.yaml). Rows marked 'not run' are waiting on the
-data-center runs.
+Each run trains from scratch on the 131K-batch baseline config (B300) with the amount of
+text held fixed (see configs/ablations/vocab_size.yaml). BPB and perplexity are under the
+int8 scheme. Perplexity is per token and not comparable across rows. memory_mb counts
+non-embedding weights and KV cache only, so it is the same for every vocabulary; the
+vocabulary shows up in total params (tied embedding table).
 
-| rank | variant | run | perplexity fp / quant | BPB | judge_mean | memory_mb | d-bpb vs baseline |
-|---|---|---|---|---|---|---|---|
-| - | vocab_size=12000,tokens=506075168 | 1b069e964b | not run | - | - | 29.4 | - |
-| - | vocab_size=25000,tokens=504351627 | 25f071f726 | not run | - | - | 29.4 | - |
-| - | baseline | 27cb45751c | not run | - | - | 29.4 | - |
-| - | vocab_size=16000,tokens=505069953 | a17e1945dd | not run | - | - | 29.4 | - |
-| - | vocab_size=8000,tokens=509287831 | acefd89fea | not run | - | - | 29.4 | - |
-| - | vocab_size=4000,tokens=531004867 | db30129050 | not run | - | - | 29.4 | - |
+| rank | variant | run | perplexity fp / quant | BPB | judge_mean | memory_mb | d-bpb vs baseline | total params (M) |
+|---|---|---|---|---|---|---|---|---|
+| 1 | vocab_size=16000,tokens=505069953 | a17e1945dd | 3.97 / 3.97 | 0.4822 | - | 29.4 | -0.0006 | 33.6 |
+| 2 | baseline | 27cb45751c | 3.98 / 3.99 | 0.4828 | - | 29.4 | +0.0000 | 51.0 |
+| 3 | vocab_size=25000,tokens=504351627 | 25f071f726 | 3.99 / 3.99 | 0.4831 | - | 29.4 | +0.0004 | 38.2 |
+| 4 | vocab_size=12000,tokens=506075168 | 1b069e964b | 3.98 / 3.99 | 0.4841 | - | 29.4 | +0.0014 | 31.6 |
+| 5 | vocab_size=8000,tokens=509287831 | acefd89fea | 3.96 / 3.97 | 0.4858 | - | 29.4 | +0.0030 | 29.5 |
+| 6 | vocab_size=4000,tokens=531004867 | db30129050 | 3.80 / 3.81 | 0.4918 | - | 29.4 | +0.0090 | 27.5 |
 
-## Samples (`bevotron sample <id> [--quant] -n 1 --max-new-tokens 150 --seed 0`, prompt "Once upon a time")
+## Samples
 
-### bevotron sample 4c89c1af04
+Every sample uses the prompt "Once upon a time", seed 0, temperature 0.7, top-k 50 and
+150 new tokens (`bevotron sample <id> [--quant] -n 1 --max-new-tokens 150 --seed 0`).
+`--quant` applies the run's PTQ scheme; without it the checkpoint runs in full precision.
+Vocab samples are full precision. Smaller vocabularies spend more tokens per word, so
+their 150 tokens cover slightly less text.
+
+### Precision
+
+#### bevotron sample 4c89c1af04
 
 ```text
 Once upon a time, there was a little girl named Lily. She loved to draw and color pictures of animals. One day, she drew a picture of a big, gray elephant. She was so proud of her picture that she couldn't stop drawing it.
@@ -39,7 +49,7 @@ Lily's mom came in and asked her what she was drawing. Lily proudly showed her t
 Later that day, Lily's friends came over to play. They all wanted to draw something too. Lily decided to lead them all some ideas on how to draw a picture of a elephant. They all had so much fun and Lily felt very proud of herself
 ```
 
-### bevotron sample 4c89c1af04 --quant
+#### bevotron sample 4c89c1af04 --quant
 
 ```text
 Once upon a time, there was a little girl named Lily. She loved to draw and color pictures of animals. One day, she drew a picture of a big, gray elephant. She was so proud of her picture that she couldn't stop smiling.
@@ -51,7 +61,7 @@ Later that day, Lily showed her brother the picture she had drawn. He thought it
 The next day,
 ```
 
-### bevotron sample 97c1a6468e --quant
+#### bevotron sample 97c1a6468e --quant
 
 ```text
 Once upon a time, there and one, a, the big, two of a deep, of the one, a wide, it.
@@ -67,7 +77,7 @@ Once upon a time, there and one, a, the big, two of a deep, of the one, a wide, 
 , like in the park.
 ```
 
-### bevotron sample 72ff842a7c
+#### bevotron sample 72ff842a7c
 
 ```text
 Once upon a time, there was a little girl named Lily. She loved to play outside and explore the world around her. One day, she saw a big maze made of sticks. She wanted to explore it and see what was inside.
@@ -76,7 +86,7 @@ Lily asked her mom if she could go in the maze. Her mom said yes, but warned her
 After a while, Lily got tired of exploring the maze. She went back to her mom and said, "Mommy, I wanted to go back to the maze again. It was so much fun! Can we go back tomorrow?" Her mom smiled
 ```
 
-### bevotron sample 72ff842a7c --quant
+#### bevotron sample 72ff842a7c --quant
 
 ```text
 Once upon a time, there was a little girl named Lily. She was very happy because she loved to sing and dance. One day, she saw a big maze in the park. She wanted to go inside and see what was there.
@@ -86,7 +96,7 @@ When she got to the maze, she found a lot of different ways to show her friends.
 As they played in the maze, they saw other kids playing. They were all singing and dancing like they were in a fun way to dance. But then, one of the kids did something disgusting. He stepped into the maze and made it
 ```
 
-### bevotron sample 0972284b02 --quant
+#### bevotron sample 0972284b02 --quant
 
 ```text
 Once upon a time, there was a little girl. She was only three years old and she loved to pretend. She would pretend she was a princess, a fairy, or a tent.
@@ -96,4 +106,74 @@ One day, she decided to pretend she was a fairy. She danced around her house and
 But then, her mom saw what she was pretending and she became angry. She told the little girl she was not allowed to act like that. She told the little girl to stop playing and to take care of her toys.
 
 The little girl was sad and she knew she was not allowed to do it anymore. She knew her mom was right
+```
+
+### Vocabulary size
+
+#### bevotron sample 27cb45751c (vocab 50k)
+
+```text
+Once upon a time, there was a little girl named Lily. She loved to draw and color pictures. One day, she drew a pretty picture of a flower. She was so happy with it that she started to spin around and around.
+
+Suddenly, her little brother came in and saw the picture. He wanted to have it too, but Lily didn't want to share. They started to argue, and Lily got very angry. She decided to take the picture away from her brother and keep it for herself.
+
+Her brother got very upset and started to cry. Lily felt bad and realized that it wasn't nice to not share her things with her brother. She apologized and shared the picture with him. They both smiled and continued to draw together, happy
+```
+
+#### bevotron sample 25f071f726 (vocab 25k)
+
+```text
+Once upon a time, there was a little girl. She was very sleepy and wanted to take a nap.
+
+So she went to her bedroom and lay down on her bed. She was so sleepy. She closed her eyes and fell asleep.
+
+In a few minutes later, her mommy came into her bedroom. She said, "Let's play!"
+
+The little girl was so excited, she ran to her room and jumped into her bed. She was so happy to be sleeping at the end of the night.
+
+She felt so safe and content in her bed. She was so happy that she had taken a nap while she was sleeping!
+```
+
+#### bevotron sample a17e1945dd (vocab 16k)
+
+```text
+Once upon a time, there was a little girl named Lily. She loved to draw and color pictures. One day, she drew a picture of a butterfly and showed it to her mommy. "Look, mommy! I drew a butterfly!" Lily said.
+
+Her mommy smiled and said, "That's great, Lily! You're so gifted at drawing!"
+
+Lily felt proud of herself and happy that she could make something beautiful. She decided to draw another picture of a butterfly and show it to her mommy. "Look, mommy! I drew a butterfly!" she said.
+
+Her mommy hugged her and said, "Wow, Lily! You're such a talented artist. I'm so proud of you."
+
+Lily smiled and felt happy inside
+```
+
+#### bevotron sample 1b069e964b (vocab 12k)
+
+```text
+Once upon a time, there was a little girl named Lily. She loved to draw and color with her crayons. One day, Lily's mom asked her to wash her hands before dinner. Lily went to the sink and put her hands in the water. 
+
+After she finished washing her hands, Lily went to play with her toys. She played with her dolls and her blocks. Suddenly, she heard a loud noise coming from the living room. She went to investigate and saw that her mom had left a cup of juice on the table. 
+
+Lily's mom came into the room and saw that Lily had used her crayons to draw a picture. "Lily, did you see the picture of the cup of juice?" her mom asked. Lily smiled and said,
+```
+
+#### bevotron sample acefd89fea (vocab 8k)
+
+```text
+Once upon a time, there was a little girl. She was very sleepy and she wanted to take a nap. She found a nice spot in the garden and curled up. She closed her eyes and soon fell asleep.
+
+When she woke up, she felt a big yawn in her eye. It was time to go home. She quickly got up and walked to her house. On her way, she saw a big dog. The dog was barking very loudly and the little girl was scared.
+
+But then she remembered she had a nap and it made her yawn again. She opened her eyes and saw that the dog was not scary. He was happy and wagged his tail. The little girl gave the dog some food and he ate it all up.
+```
+
+#### bevotron sample db30129050 (vocab 4k)
+
+```text
+Once upon a time, there was a little girl named Lily. She loved to draw and color with her crayons. One day, Lily's mom gave her a colorful eraser to draw with. Lily was so happy and started drawing right away.
+
+Suddenly, Lily's little brother came into the room and accidentally knocked over the eraser. Lily got upset and started to cry. But then, her mom came in and gave her a hug. She told Lily that it's okay and that she can draw a new eraser. Lily felt better and they drew a beautiful rainbow together.
+
+From that day on, Lily was not afraid to draw and draw with her new eraser. She even showed it to her friends and family. They
 ```

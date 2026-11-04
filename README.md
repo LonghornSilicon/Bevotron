@@ -7,7 +7,7 @@ One shared baseline config, one small file per study, one command to turn a stud
 ## Setup 
 
     uv sync --extra train
-    uv run pytest                                            # 54 tests to make sure everything works
+    uv run pytest                                            # 55 tests to make sure everything works
     uv run bevotron data export                              # TinyStories train split -> data/tinystories/train.txt
     uv run bevotron tokenizer train --vocab-size 50000       # artifacts/tokenizer/tokenizer_50k.json
     uv run bevotron tokenizer truncate --input artifacts/tokenizer/tokenizer_50k.json --sizes 25000 16000 12000 8000 4000
