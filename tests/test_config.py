@@ -13,7 +13,8 @@ def test_baseline_loads_and_matches_known_counts():
     assert cfg.params_per_layer() == 12 * 512**2  # 4d^2 attention + 8d^2 MLP
     assert cfg.non_embedding_params() == 25_165_824
     assert cfg.total_params() == 25_165_824 + 50_000 * 512 + 512 * 512
-    assert cfg.train.total_tokens == 504_000_000 and cfg.train.steps == 30_761
+    assert cfg.train.total_tokens == 504_000_000
+    assert cfg.train.steps == 504_000_000 // cfg.train.batch_tokens == 3_845  # 131K batch
 
 
 def test_parse_count():

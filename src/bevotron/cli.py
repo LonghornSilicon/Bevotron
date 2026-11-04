@@ -89,9 +89,17 @@ def cmd_sweep(args: argparse.Namespace) -> None:
         print(f"wrote {len(runs)} run folders under {RUNS}/")
 
 
+def _resolve_run(config: RunConfig, ablation: str | None) -> Run:
+    """Keep the ablation, label and overrides `sweep --write` recorded for this run, if any,
+    so `bevotron run` does not relabel every sweep member as the baseline."""
+    meta_path = RUNS / config.run_id() / "run.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    return Run(ablation or meta.get("ablation") or "manual", meta.get("overrides") or {}, config)
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     config = RunConfig.load(args.config)
-    folder = _write_run(Run(args.ablation, {}, config))
+    folder = _write_run(_resolve_run(config, args.ablation))
     print(f"run folder: {folder}")
     from bevotron.train.loop import train  # imports torch
 
@@ -236,7 +244,9 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("run", help="train one config")
     p.add_argument("config")
-    p.add_argument("--ablation", default="manual", help="ablation name recorded in run.json")
+    p.add_argument(
+        "--ablation", default=None, help="ablation name recorded in run.json (default: the sweep's)"
+    )
     p.add_argument("--resume", action="store_true", help="continue from runs/<id>/ckpt.pt")
     p.set_defaults(func=cmd_run)
 
