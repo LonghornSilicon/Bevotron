@@ -30,12 +30,43 @@ def test_embedding_memory_is_separate_and_scales_with_vocab():
     base = load_raw(BASELINE)
     big = memory(RunConfig.from_dict(base))  # int8, 50k vocab, tied, learned positions
     small = memory(RunConfig.from_dict(apply_overrides(base, {"tokenizer.vocab_size": 16_000})))
-    assert big.embedding_bytes == 50_000 * 512 + 512 * 512
+    positions_fp32 = 512 * 512 * 4  # PTQ never rounds learned positions
+    assert big.embedding_bytes == 50_000 * 512 * 1 + positions_fp32
     assert big.total_bytes == small.total_bytes  # memory_mb ignores the vocabulary
     assert big.embedding_bytes - small.embedding_bytes == (50_000 - 16_000) * 512
     assert math.isclose(big.with_embedding_mb, big.total_mb + big.embedding_mb)
     w4 = memory(RunConfig.from_dict(apply_overrides(base, {"quant.scheme": "w4a4kv4"})))
-    assert w4.embedding_bytes == big.embedding_bytes // 2
+    assert w4.embedding_bytes == 50_000 * 512 // 2 + positions_fp32
+
+
+def test_untied_input_table_and_positions_count_at_fp32():
+    base = load_raw(BASELINE)
+    untied = memory(RunConfig.from_dict(apply_overrides(base, {"model.tie_embeddings": False})))
+    # output layer rounded to int8; input table and positions left at fp32 by PTQ
+    assert untied.embedding_bytes == 50_000 * 512 * (1 + 4) + 512 * 512 * 4
+    rope = memory(RunConfig.from_dict(apply_overrides(base, {"model.pos_encoding": "rope"})))
+    assert rope.embedding_bytes == 50_000 * 512
+
+
+def test_ptq_rounds_only_the_tables_memory_counts_as_rounded():
+    import torch
+
+    from bevotron.models.transformer import Bevo
+    from bevotron.quant.ptq import apply_ptq, fake_quantize
+
+    raw = apply_overrides(load_raw(BASELINE), {"tokenizer.vocab_size": 300, "model.n_layer": 1})
+    for tied in (True, False):
+        cfg = RunConfig.from_dict(apply_overrides(raw, {"model.tie_embeddings": tied}))
+        model = Bevo(cfg)
+        before = {n: p.detach().clone() for n, p in model.named_parameters()}
+        apply_ptq(model, "int8")
+        head = model.lm_head.weight
+        assert torch.equal(
+            head, fake_quantize(before["lm_head.weight" if not tied else "wte.weight"], 8, dim=1)
+        )
+        assert torch.equal(model.wte.weight, head) == tied
+        pos = [n for n in before if n.startswith("positions")]
+        assert pos and all(torch.equal(before[n], dict(model.named_parameters())[n]) for n in pos)
 
 
 def test_bits_per_byte_worked_example():

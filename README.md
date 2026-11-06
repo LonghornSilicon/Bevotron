@@ -68,8 +68,10 @@ multiple of `n_kv_head` (use `pairs` to change both together).
 - **Bits per byte**: the same loss normalized by bytes of text; use it for the vocab study,
   where per-token perplexity is not comparable across tokenizers.
 - **Memory**: `memory_mb` is non-embedding weight + KV-cache bytes at the run's precision
-  and context length, so it does not change with vocabulary. `embedding_mb` is the tied
-  token table plus positions at the weight precision, and `memory_with_embedding_mb` adds
+  and context length, so it does not change with vocabulary. `embedding_mb` is the
+  embeddings as the evaluated model stores them: the output-layer table (tied, also the
+  input table) at the weight precision, and learned positions or an untied input table at
+  fp32, since PTQ and QAT round only `nn.Linear` weights. `memory_with_embedding_mb` adds
   it: the size a chip needs if it runs the output layer, which reads the whole table for
   every token. `embedding_params` is listed apart from `total_params` for the same reason.
 
