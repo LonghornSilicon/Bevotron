@@ -50,7 +50,7 @@ def apply_ptq(model: nn.Module, scheme: str) -> nn.Module:
                 module.register_forward_pre_hook(_activation_hook(a_bits))
         if kv_bits is not None and hasattr(module, "kv_quant"):
             module.kv_quant = lambda t, b=kv_bits: fake_quantize(
-                t, b, dim=-2
+                t, b, dim=-1
             )  # per token, per head
     return model
 

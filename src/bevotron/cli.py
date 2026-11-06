@@ -39,14 +39,25 @@ def _write_run(run: Run) -> Path:
                 "label": run.label,
                 "overrides": run.overrides,
                 "git_sha": _git_sha(),
-                "non_embedding_params": run.config.non_embedding_params(),
-                "total_params": run.config.total_params(),
-                "memory_mb": memory(run.config).total_mb,
+                **_size_fields(run.config),
             },
             indent=2,
         )
     )
     return folder
+
+
+def _size_fields(config: RunConfig) -> dict:
+    """Parameter counts and memory, with the vocabulary-dependent embedding kept separate."""
+    mem = memory(config)
+    return {
+        "non_embedding_params": config.non_embedding_params(),
+        "embedding_params": config.embedding_params(),
+        "total_params": config.total_params(),
+        "memory_mb": mem.total_mb,
+        "embedding_mb": mem.embedding_mb,
+        "memory_with_embedding_mb": mem.with_embedding_mb,
+    }
 
 
 def cmd_info(args: argparse.Namespace) -> None:
@@ -71,6 +82,10 @@ def cmd_info(args: argparse.Namespace) -> None:
         f"memory ({config.quant.scheme:<7}) {mem.weight_bytes / 1e6:.1f} MB weights + "
         f"{mem.kv_cache_bytes / 1e6:.1f} MB KV cache = {mem.total_mb:.1f} MB"
     )
+    print(
+        f"  + embedding     {mem.embedding_mb:.1f} MB embeddings = "
+        f"{mem.with_embedding_mb:.1f} MB if the chip runs the output layer"
+    )
 
 
 def cmd_sweep(args: argparse.Namespace) -> None:
@@ -89,9 +104,17 @@ def cmd_sweep(args: argparse.Namespace) -> None:
         print(f"wrote {len(runs)} run folders under {RUNS}/")
 
 
+def _resolve_run(config: RunConfig, ablation: str | None) -> Run:
+    """Keep the ablation, label and overrides `sweep --write` recorded for this run, if any,
+    so `bevotron run` does not relabel every sweep member as the baseline."""
+    meta_path = RUNS / config.run_id() / "run.json"
+    meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    return Run(ablation or meta.get("ablation") or "manual", meta.get("overrides") or {}, config)
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     config = RunConfig.load(args.config)
-    folder = _write_run(Run(args.ablation, {}, config))
+    folder = _write_run(_resolve_run(config, args.ablation))
     print(f"run folder: {folder}")
     from bevotron.train.loop import train  # imports torch
 
@@ -175,14 +198,16 @@ def cmd_compare(args: argparse.Namespace) -> None:
             continue
         evaluation = run_json.with_name("eval.json")
         result = json.loads(evaluation.read_text()) if evaluation.exists() else {}
-        rows.append({**meta, **result})
+        # sizes come from the saved config, so runs written before a field existed get it too
+        config = RunConfig.load(run_json.with_name("config.yaml"))
+        rows.append({**meta, **result, **_size_fields(config)})
     if not rows:
         sys.exit(
             f"no runs found for ablation {args.ablation!r}; run `bevotron sweep --write` first"
         )
     baseline = next((r for r in rows if r["label"] == "baseline"), None)
     for row in rows:
-        for metric in ("perplexity", "bpb", "judge_mean"):
+        for metric in ("perplexity", "bpb", "judge_mean", "memory_with_embedding_mb"):
             if baseline and metric in row and metric in baseline:
                 row[f"delta_{metric}"] = row[metric] - baseline[metric]
     RESULTS.mkdir(exist_ok=True)
@@ -236,7 +261,9 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("run", help="train one config")
     p.add_argument("config")
-    p.add_argument("--ablation", default="manual", help="ablation name recorded in run.json")
+    p.add_argument(
+        "--ablation", default=None, help="ablation name recorded in run.json (default: the sweep's)"
+    )
     p.add_argument("--resume", action="store_true", help="continue from runs/<id>/ckpt.pt")
     p.set_defaults(func=cmd_run)
 

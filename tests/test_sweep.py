@@ -18,7 +18,7 @@ def test_every_ablation_file_expands_and_starts_with_baseline():
         "attention": 1 + 2,
         "vocab_size": 1 + 5,
         "context_length": 1 + 2,
-        "precision": 1 + 2,
+        "precision": 1 + 3,
     }
     for path in sorted(ABLATIONS.glob("*.yaml")):
         runs = load_sweep(path, BASELINE)
@@ -51,3 +51,14 @@ def test_overrides_apply_to_all_runs():
         baseline,
     )
     assert all(r.config.train.total_tokens == 32_000_000 for r in runs)
+
+
+def test_vocab_study_holds_text_fixed_not_tokens():
+    # Smaller vocabularies spend more tokens on the same stories, so every vocab run gets at
+    # least the baseline's token budget and the smallest vocabulary gets the most.
+    runs = load_sweep(ABLATIONS / "vocab_size.yaml", BASELINE)
+    budget = runs[0].config.train.total_tokens
+    by_vocab = {r.config.tokenizer.vocab_size: r.config.train.total_tokens for r in runs[1:]}
+    assert all(tokens >= budget for tokens in by_vocab.values())
+    assert by_vocab[4000] == max(by_vocab.values()) > budget
+    assert all(r.config.train.batch_tokens == runs[0].config.train.batch_tokens for r in runs)
