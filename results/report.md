@@ -3,31 +3,52 @@
 ## Precision (ranked by quantized perplexity; lower is better)
 
 Baseline 8L/512d/16H bevo, 50k TinyStories BPE, 504M tokens, 16K-batch laptop config.
-Memory = non-embedding weights + KV cache at the scheme's precision, 512-token context.
+memory_mb = non-embedding weights + KV cache at the scheme's precision, 512-token context.
+Memory with embedding adds the tied token table and positions at the weight precision,
+which a chip that runs the output layer has to hold or stream for every token.
 
-| rank | variant | run | perplexity fp / quant | BPB | judge_mean | memory_mb | d-perplexity vs baseline |
-|---|---|---|---|---|---|---|---|
-| 1 | baseline | 4c89c1af04 | 4.18 / 4.19 | 0.5000 | - | 29.4 | +0.00 |
-| 2 | scheme=w4a8kv4,mode=ptq | 0972284b02 | 4.18 / 5.25 | 0.5786 | - | 14.7 | +1.06 |
-| 3 | scheme=w4a4kv4,mode=qat | 72ff842a7c | 5.36 / 5.69 | 0.6065 | - | 14.7 | +1.50 |
-| 4 | scheme=w4a4kv4,mode=ptq | 97c1a6468e | 4.18 / 245.42 | 1.9192 | - | 14.7 | +241.22 |
+| rank | variant | run | perplexity fp / quant | BPB | judge_mean | memory_mb | memory with embedding (MB) | d-perplexity vs baseline |
+|---|---|---|---|---|---|---|---|---|
+| 1 | baseline | 4c89c1af04 | 4.18 / 4.19 | 0.5000 | - | 29.4 | 55.2 | +0.00 |
+| 2 | scheme=w4a8kv4,mode=ptq | 0972284b02 | 4.18 / 5.25 | 0.5786 | - | 14.7 | 27.6 | +1.06 |
+| 3 | scheme=w4a4kv4,mode=qat | 72ff842a7c | 5.36 / 5.69 | 0.6065 | - | 14.7 | 27.6 | +1.50 |
+| 4 | scheme=w4a4kv4,mode=ptq | 97c1a6468e | 4.18 / 245.42 | 1.9192 | - | 14.7 | 27.6 | +241.22 |
 
 ## Vocabulary size (ranked by bits per byte; lower is better)
 
 Each run trains from scratch on the 131K-batch baseline config (B300) with the amount of
 text held fixed (see configs/ablations/vocab_size.yaml). BPB and perplexity are under the
 int8 scheme. Perplexity is per token and not comparable across rows. memory_mb counts
-non-embedding weights and KV cache only, so it is the same for every vocabulary; the
-vocabulary shows up in total params (tied embedding table).
+non-embedding weights and KV cache only, so it is the same for every vocabulary. The
+vocabulary only changes the embedding params: the tied token table (vocab x 512) plus
+512 x 512 learned positions.
 
-| rank | variant | run | perplexity fp / quant | BPB | judge_mean | memory_mb | d-bpb vs baseline | total params (M) |
-|---|---|---|---|---|---|---|---|---|
-| 1 | vocab_size=16000,tokens=505069953 | a17e1945dd | 3.97 / 3.97 | 0.4822 | - | 29.4 | -0.0006 | 33.6 |
-| 2 | baseline | 27cb45751c | 3.98 / 3.99 | 0.4828 | - | 29.4 | +0.0000 | 51.0 |
-| 3 | vocab_size=25000,tokens=504351627 | 25f071f726 | 3.99 / 3.99 | 0.4831 | - | 29.4 | +0.0004 | 38.2 |
-| 4 | vocab_size=12000,tokens=506075168 | 1b069e964b | 3.98 / 3.99 | 0.4841 | - | 29.4 | +0.0014 | 31.6 |
-| 5 | vocab_size=8000,tokens=509287831 | acefd89fea | 3.96 / 3.97 | 0.4858 | - | 29.4 | +0.0030 | 29.5 |
-| 6 | vocab_size=4000,tokens=531004867 | db30129050 | 3.80 / 3.81 | 0.4918 | - | 29.4 | +0.0090 | 27.5 |
+| rank | vocab | run | perplexity fp / quant | BPB | d-BPB vs 50k | judge_mean | non-embedding params (M) | embedding params (M) | total params (M) | memory_mb |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 1 | 16k | a17e1945dd | 3.97 / 3.97 | 0.4822 | -0.0006 | - | 25.2 | 8.5 | 33.6 | 29.4 |
+| 2 | 50k | 27cb45751c | 3.98 / 3.99 | 0.4828 | +0.0000 | - | 25.2 | 25.9 | 51.0 | 29.4 |
+| 3 | 25k | 25f071f726 | 3.99 / 3.99 | 0.4831 | +0.0004 | - | 25.2 | 13.1 | 38.2 | 29.4 |
+| 4 | 12k | 1b069e964b | 3.98 / 3.99 | 0.4841 | +0.0014 | - | 25.2 | 6.4 | 31.6 | 29.4 |
+| 5 | 8k | acefd89fea | 3.96 / 3.97 | 0.4858 | +0.0030 | - | 25.2 | 4.4 | 29.5 | 29.4 |
+| 6 | 4k | db30129050 | 3.80 / 3.81 | 0.4918 | +0.0090 | - | 25.2 | 2.3 | 27.5 | 29.4 |
+
+### Memory saved by a smaller vocabulary
+
+Memory with embedding = non-embedding weights + KV cache + embeddings, all at the
+scheme's precision. The output layer shares the token table and reads all of it for
+every generated token, so this is the size a chip that runs the output layer needs.
+int8 is the scheme these runs were scored under (PTQ quantizes the tied table too);
+int4 is the same model stored as w4a4kv4. Every part halves together, so the
+percentage saved is the same at both precisions.
+
+| vocab | embedding params (M) | int8: memory with embedding (MB) | int8: saved vs 50k | int4: memory with embedding (MB) | int4: saved vs 50k | saved % |
+|---|---|---|---|---|---|---|
+| 50k | 25.9 | 55.2 | - | 27.6 | - | - |
+| 25k | 13.1 | 42.4 | 12.8 MB | 21.2 | 6.4 MB | 23.2% |
+| 16k | 8.5 | 37.8 | 17.4 MB | 18.9 | 8.7 MB | 31.5% |
+| 12k | 6.4 | 35.8 | 19.5 MB | 17.9 | 9.7 MB | 35.2% |
+| 8k | 4.4 | 33.7 | 21.5 MB | 16.9 | 10.8 MB | 38.9% |
+| 4k | 2.3 | 31.7 | 23.6 MB | 15.8 | 11.8 MB | 42.6% |
 
 ## Samples
 

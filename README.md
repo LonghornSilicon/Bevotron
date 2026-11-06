@@ -7,7 +7,7 @@ One shared baseline config, one small file per study, one command to turn a stud
 ## Setup 
 
     uv sync --extra train
-    uv run pytest                                            # 55 tests to make sure everything works
+    uv run pytest                                            # 56 tests to make sure everything works
     uv run bevotron data export                              # TinyStories train split -> data/tinystories/train.txt
     uv run bevotron tokenizer train --vocab-size 50000       # artifacts/tokenizer/tokenizer_50k.json
     uv run bevotron tokenizer truncate --input artifacts/tokenizer/tokenizer_50k.json --sizes 25000 16000 12000 8000 4000
@@ -67,7 +67,11 @@ multiple of `n_kv_head` (use `pairs` to change both together).
   Default judge is Sonnet 4.6.
 - **Bits per byte**: the same loss normalized by bytes of text; use it for the vocab study,
   where per-token perplexity is not comparable across tokenizers.
-- **Memory**: weight + KV-cache bytes at the run's precision and context length.
+- **Memory**: `memory_mb` is non-embedding weight + KV-cache bytes at the run's precision
+  and context length, so it does not change with vocabulary. `embedding_mb` is the tied
+  token table plus positions at the weight precision, and `memory_with_embedding_mb` adds
+  it: the size a chip needs if it runs the output layer, which reads the whole table for
+  every token. `embedding_params` is listed apart from `total_params` for the same reason.
 
 `bevotron compare <study>` writes all of these plus deltas vs the baseline to `results/<study>.csv`.
 

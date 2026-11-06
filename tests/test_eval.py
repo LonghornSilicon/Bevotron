@@ -26,6 +26,18 @@ def test_memory_responds_to_knobs():
     assert local.kv_cache_bytes == 2 * 8 * 16 * 32 * 256
 
 
+def test_embedding_memory_is_separate_and_scales_with_vocab():
+    base = load_raw(BASELINE)
+    big = memory(RunConfig.from_dict(base))  # int8, 50k vocab, tied, learned positions
+    small = memory(RunConfig.from_dict(apply_overrides(base, {"tokenizer.vocab_size": 16_000})))
+    assert big.embedding_bytes == 50_000 * 512 + 512 * 512
+    assert big.total_bytes == small.total_bytes  # memory_mb ignores the vocabulary
+    assert big.embedding_bytes - small.embedding_bytes == (50_000 - 16_000) * 512
+    assert math.isclose(big.with_embedding_mb, big.total_mb + big.embedding_mb)
+    w4 = memory(RunConfig.from_dict(apply_overrides(base, {"quant.scheme": "w4a4kv4"})))
+    assert w4.embedding_bytes == big.embedding_bytes // 2
+
+
 def test_bits_per_byte_worked_example():
     # "The cat sat." is 12 bytes; model A: 4 tokens at 2.0 nats, model B: 8 tokens at 1.2 nats
     a = bits_per_byte(2.0, 4, 12)
