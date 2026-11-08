@@ -144,6 +144,42 @@ def prepare(config: RunConfig, workers: int = 8, force: bool = False) -> Dataset
     return meta
 
 
+def val_split(config: RunConfig, workers: int = 8) -> tuple[np.memmap, int, int]:
+    """Validation tokens plus the token and byte counts bits per byte needs.
+
+    Uses the full cache when `prepare` has run for this tokenizer. Otherwise tokenizes only
+    the validation split (seconds instead of the train split's hour) into the same
+    per-tokenizer folder, with its counts in val_meta.json.
+    """
+    folder = cache_dir(config)
+    if (folder / "meta.json").exists():
+        meta = prepare(config)
+        return load_split(config, "val"), meta.val_tokens, meta.val_bytes
+    meta_path = folder / "val_meta.json"
+    if not meta_path.exists():
+        from datasets import load_dataset
+
+        spec = DATASETS[config.data.dataset]
+        tokenizer_path = resolve_tokenizer_path(config)
+        tok = BPETokenizer.load(tokenizer_path)
+        if tok.vocab_size != config.tokenizer.vocab_size:
+            raise ValueError(
+                f"tokenizer has {tok.vocab_size} tokens, config says {config.tokenizer.vocab_size}"
+            )
+        dtype = np.uint16 if tok.vocab_size <= 65535 else np.uint32
+        folder.mkdir(parents=True, exist_ok=True)
+        split = load_dataset(spec.hf_name, split=spec.val_split)
+        tokens, n_bytes = _encode_split(
+            split, spec.text_field, tokenizer_path, dtype, folder / "val.bin", workers
+        )
+        meta_path.write_text(
+            json.dumps({"val_tokens": tokens, "val_bytes": n_bytes, "dtype": np.dtype(dtype).name})
+        )
+    meta = json.loads(meta_path.read_text())
+    data = np.memmap(folder / "val.bin", dtype=np.dtype(meta["dtype"]), mode="r")
+    return data, meta["val_tokens"], meta["val_bytes"]
+
+
 def load_split(config: RunConfig, split: str) -> np.memmap:
     meta = prepare(config)
     return np.memmap(cache_dir(config) / f"{split}.bin", dtype=np.dtype(meta.dtype), mode="r")

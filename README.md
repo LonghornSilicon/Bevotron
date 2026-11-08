@@ -7,7 +7,7 @@ One shared baseline config, one small file per study, one command to turn a stud
 ## Setup 
 
     uv sync --extra train
-    uv run pytest                                            # 56 tests to make sure everything works
+    uv run pytest                                            # 64 tests to make sure everything works
     uv run bevotron data export                              # TinyStories train split -> data/tinystories/train.txt
     uv run bevotron tokenizer train --vocab-size 50000       # artifacts/tokenizer/tokenizer_50k.json
     uv run bevotron tokenizer truncate --input artifacts/tokenizer/tokenizer_50k.json --sizes 25000 16000 12000 8000 4000
@@ -99,6 +99,44 @@ row's `train.tokens` is the baseline budget scaled by that tokenizer's train-spl
 (the numbers and the formula are in the study file; regenerate them after retraining the
 tokenizer or changing the baseline budget).
 
+## Comparison site (`bevotron site`)
+
+A page on http://localhost:8642 for weighing every ablation's quality against its hardware
+cost. It only listens on 127.0.0.1 and runs the models on this machine.
+
+    uv sync --extra site                     # torch, datasets, huggingface_hub, safetensors
+    uv run bevotron registry                 # rebuild configs/models.json from ./runs
+    uv run bevotron site                     # --source auto|local|hub, --device, --port
+
+- **Overview**: quality (BPB, perplexity, judge score or a local eval) against hardware cost
+  (ms/token at a chosen link bandwidth, MB streamed per token, model MB or MACs/token), with
+  each study's Pareto frontier. The table lists every model's change from its study's
+  baseline, scores, embedding and total params, model MB, ms/token and speedup.
+- **Generate**: up to six models side by side, each quantized as scored or at fp32, with
+  the same prompt, seed and sampling settings.
+- **Evaluate**: a quick eval on the first 5% of the validation split, or the full split
+  (the same number eval.json holds). Results are saved to `results/site_evals.json`.
+
+`configs/models.json` lists every run: its study, the change it makes, its scores, its
+config and its folder on the Hugging Face Hub. `weights` names the run whose folder holds
+the checkpoint, because PTQ runs share their baseline's weights. Names and notes edited by
+hand survive `bevotron registry`. The site loads a model from `./runs` when this machine
+trained it, otherwise from the Hub. To publish runs for the rest of the team:
+
+    hf auth login                            # a token with write access to the org
+    uv run bevotron hub push [ids...] --repo LonghornSilicon/bevo-ablations
+
+Each run uploads to `<repo>/<run id>/`: config.yaml, run.json, eval.json, tokenizer.json,
+and model.safetensors for runs that own a checkpoint. Weights are saved without optimizer
+state, and the tied output layer is dropped because the model re-ties it on load. The push
+marks the runs uploaded in configs/models.json, so commit that file afterwards.
+
+Hardware cost follows `eval/latency.py`: Reef streams weights and the KV cache from the host
+for every token, so ms/token = bytes streamed / link bandwidth, compute ignored. With
+"output layer on chip" ticked, the vocab x d_model output table is streamed too. Local
+tok/s on the Generate tab is PyTorch with fake quantization and says nothing about hardware
+speed.
+
 ## Layout
 
     configs/baseline.yaml, configs/ablations/   the shared baseline; one file per study
@@ -109,5 +147,6 @@ tokenizer or changing the baseline budget).
     src/bevotron/train/                         loop, AdamW, warmup+cosine, checkpoints, resume
     src/bevotron/quant/                         simulated PTQ and QAT: int8, w4a8, w4a4kv4, w4a8kv4
     src/bevotron/eval/                          perplexity, bits per byte, LLM judge, memory, latency floor
+    src/bevotron/site/                          comparison site: registry, Hub push/pull, cost model, server, page
     runs/<id>/                                  gitignored run outputs
     results/<study>.csv                         committed: each run vs the baseline

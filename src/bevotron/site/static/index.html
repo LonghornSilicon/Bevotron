@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bevotron Ablations</title>
+<style>
+:root {
+  --bg: #f7f7f5; --panel: #ffffff; --ink: #1b1d21; --muted: #646a73; --line: #e2e3e0;
+  --accent: #b5501d; --accent-ink: #ffffff; --good: #2f7d4f; --bad: #b3261e; --chip: #efefec;
+  --c0: #b5501d; --c1: #2f6db5; --c2: #2f7d4f; --c3: #8a4fb5; --c4: #a3850f; --c5: #b52f6d;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #131416; --panel: #1b1d20; --ink: #e9e9e6; --muted: #9aa0a8; --line: #2c2f33;
+    --accent: #e0793f; --accent-ink: #131416; --good: #5fbf85; --bad: #ef6a5f; --chip: #25282c;
+    --c0: #e0793f; --c1: #6aa2e6; --c2: #5fbf85; --c3: #b88ae6; --c4: #d6b740; --c5: #e66aa2;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #131416; --panel: #1b1d20; --ink: #e9e9e6; --muted: #9aa0a8; --line: #2c2f33;
+  --accent: #e0793f; --accent-ink: #131416; --good: #5fbf85; --bad: #ef6a5f; --chip: #25282c;
+  --c0: #e0793f; --c1: #6aa2e6; --c2: #5fbf85; --c3: #b88ae6; --c4: #d6b740; --c5: #e66aa2;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center;
+  padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 17px; margin: 0; letter-spacing: .2px; }
+header .meta { color: var(--muted); font-size: 12.5px; display: flex; gap: 14px; flex-wrap: wrap; }
+nav { display: flex; gap: 4px; margin-left: auto; }
+nav button, .btn { border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+  padding: 6px 12px; border-radius: 7px; cursor: pointer; font: inherit; }
+nav button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: default; }
+main { padding: 18px 20px 40px; max-width: 1500px; margin: 0 auto; }
+section.tab { display: none; } section.tab.on { display: block; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
+.panel h2 { font-size: 14px; margin: 0 0 10px; }
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 10px; }
+.controls label { color: var(--muted); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
+select, input[type=number], input[type=text], textarea { font: inherit; color: var(--ink);
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
+input[type=number] { width: 84px; }
+textarea { width: 100%; min-height: 56px; resize: vertical; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip { border: 1px solid var(--line); background: var(--chip); border-radius: 999px; padding: 3px 10px;
+  cursor: pointer; font-size: 12.5px; color: var(--ink); }
+.chip.off { opacity: .45; }
+.chip i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+.note { color: var(--muted); font-size: 12.5px; margin: 6px 0 0; }
+svg text { fill: var(--muted); font-size: 11px; }
+svg .lbl { fill: var(--ink); font-size: 11px; }
+svg .axis { stroke: var(--line); }
+svg .grid { stroke: var(--line); stroke-dasharray: 2 4; }
+.tablewrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--panel); }
+th.l, td.l { text-align: left; }
+td.num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; }
+tr.base td { background: color-mix(in srgb, var(--chip) 70%, transparent); }
+.good { color: var(--good); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
+a { color: var(--accent); }
+.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 12px; }
+.slot { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 6px; }
+.slot select { width: 100%; }
+.slot .row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+.outs { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.out { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; }
+.out h3 { font-size: 13.5px; margin: 0 0 2px; }
+.out .sub { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+.out pre { white-space: pre-wrap; font: 13.5px/1.5 system-ui, sans-serif; margin: 0; flex: 1; }
+.out .foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.out.err pre { color: var(--bad); }
+.bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+.job { display: grid; grid-template-columns: 1fr 160px; gap: 4px 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.job .msg { color: var(--muted); font-size: 12px; grid-column: 1 / -1; }
+.pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 14px; margin-bottom: 10px; }
+.pick label { display: flex; gap: 6px; align-items: center; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+.kpi b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
+.kpi span { color: var(--muted); font-size: 12px; }
+@media (max-width: 700px) { main { padding: 12px 16px 30px; } nav { margin-left: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Bevotron ablations</h1>
+  <div class="meta" id="meta"></div>
+  <nav>
+    <button data-tab="overview" class="on">Overview</button>
+    <button data-tab="generate">Generate</button>
+    <button data-tab="evaluate">Evaluate</button>
+    <button id="theme" title="Switch light and dark">◐</button>
+  </nav>
+</header>
+<main>
+<section class="tab on" id="overview">
+  <div class="kpis" id="kpis"></div>
+  <div class="panel">
+    <h2>Quality against hardware cost</h2>
+    <div class="controls">
+      <label>Y <select id="ymetric"></select></label>
+      <label>X <select id="xmetric"></select></label>
+      <label><input type="checkbox" id="logy"> log Y</label>
+      <label>Link <input type="number" id="link" min="1" step="10"> MB/s</label>
+      <label title="Reef streams weights and KV cache from the host for every token. If the chip also runs the output layer, it streams the whole vocab x d_model table too."><input type="checkbox" id="onchip" checked> output layer on chip</label>
+      <div class="chips" id="ablations"></div>
+    </div>
+    <svg id="chart" viewBox="0 0 900 420" role="img" aria-label="Scatter of quality against hardware cost"></svg>
+    <p class="note">Lower-left is better. Dashed lines join each study's Pareto frontier: no other run in that study is both cheaper and better. ms/token is the bandwidth floor from eval/latency.py: bytes streamed per token ÷ link bandwidth, compute ignored.</p>
+  </div>
+  <div class="panel">
+    <h2>All models <span class="muted" style="font-weight:400">· click a header to sort · tick rows to compare</span></h2>
+    <div class="controls">
+      <button class="btn" id="toGenerate">Generate with selected</button>
+      <button class="btn" id="toEvaluate">Evaluate selected</button>
+      <span class="note" id="selcount"></span>
+    </div>
+    <div class="tablewrap"><table id="table"></table></div>
+    <p class="note">BPB and perplexity are under each run's scheme unless marked fp. Perplexity is per token, so it only compares runs with the same vocabulary. Δ and speedup are against the baseline of the same study. Model MB is non-embedding weights + KV cache + embeddings (the output-layer table only counts when the chip runs that layer).</p>
+  </div>
+</section>
+
+<section class="tab" id="generate">
+  <div class="panel">
+    <h2>Side-by-side generation</h2>
+    <div class="slots" id="slots"></div>
+    <div class="controls">
+      <button class="btn" id="addSlot">+ model</button>
+      <label>Seed <input type="number" id="seed" value="0"></label>
+      <label>Temperature <input type="number" id="temperature" value="0.7" step="0.1" min="0" max="2"></label>
+      <label>Top-k <input type="number" id="topk" value="50" min="1"></label>
+      <label>Max new tokens <input type="number" id="maxtok" value="150" min="1" max="512"></label>
+    </div>
+    <textarea id="prompt">Once upon a time</textarea>
+    <div class="controls" style="margin-top:10px">
+      <button class="btn primary" id="runGen">Generate</button>
+      <span class="note" id="genStatus"></span>
+    </div>
+    <p class="note">Same prompt and seed for every model. Local tok/s is PyTorch on this machine with fake quantization, so it says nothing about hardware speed. Use the modeled ms/token for that.</p>
+  </div>
+  <div class="outs" id="outs"></div>
+</section>
+
+<section class="tab" id="evaluate">
+  <div class="panel">
+    <h2>Run evals on this machine</h2>
+    <div class="pick" id="evalPick"></div>
+    <div class="controls">
+      <label><input type="radio" name="scope" value="quick" checked> quick: first <span id="qfrac"></span> of validation</label>
+      <label><input type="radio" name="scope" value="full"> full validation split (matches eval.json)</label>
+      <button class="btn primary" id="runEval">Run eval</button>
+    </div>
+    <div id="jobs"></div>
+  </div>
+  <div class="panel">
+    <h2>Local eval results</h2>
+    <div class="tablewrap"><table id="evalTable"></table></div>
+    <p class="note">Saved to results/site_evals.json. A quick eval scores the same opening stretch of text for every model, so quick numbers compare with each other, not with the stored full-split BPB.</p>
+  </div>
+</section>
+</main>
+
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") n.className = v; else if (k === "text") n.textContent = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v); else n.setAttribute(k, v);
+  }
+  for (const k of kids) if (k != null) n.append(k);
+  return n;
+};
+const SVG = "http://www.w3.org/2000/svg";
+const sv = (tag, attrs = {}) => { const n = document.createElementNS(SVG, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
+const fmt = (v, d = 2) => (v == null || Number.isNaN(v) ? "–" : Number(v).toFixed(d));
+const fmtSigned = (v, d = 4) => (v == null ? "–" : (v > 0 ? "+" : v < 0 ? "−" : "±") + Math.abs(v).toFixed(d));
+
+let S = null;                       // /api/state
+const selected = new Set();
+const hiddenAblations = new Set();
+let sortKey = null, sortDir = 1;
+const palette = ["--c0", "--c1", "--c2", "--c3", "--c4", "--c5"];
+const color = (ab) => `var(${palette[S.ablations.indexOf(ab) % palette.length]})`;
+
+// ---------- derived numbers ----------
+function hw(m) {
+  const link = Math.max(1, +$("#link").value || S.link_mb_per_s);
+  const onChip = $("#onchip").checked, c = m.cost;
+  const stream = onChip ? c.stream_mb_chip_output : c.stream_mb_host_output;
+  return {
+    stream, ms: stream / link * 1000,
+    modelMb: onChip ? c.stored_mb : c.memory_mb,
+    macs: onChip ? c.macs_per_token : c.macs_per_token - c.output_table_params,
+  };
+}
+const byId = (id) => S.models.find((m) => m.id === id);
+function localBpb(m) { const e = m.local_evals || {}; return (e.full || e.quick || {}).bpb; }
+const Y = {
+  bpb: { label: "Bits per byte (scheme)", get: (m) => m.results.bpb, d: 4 },
+  bpb_fp: { label: "Bits per byte (fp32)", get: (m) => m.results.bpb_fp, d: 4 },
+  perplexity: { label: "Perplexity (scheme)", get: (m) => m.results.perplexity, d: 2 },
+  judge: { label: "Judge score (higher is better)", get: (m) => m.results.judge_mean, d: 2, higher: true },
+  local: { label: "Local eval BPB", get: localBpb, d: 4 },
+};
+const X = {
+  ms: { label: "ms / token at link bandwidth", get: (m) => hw(m).ms, d: 1 },
+  stream: { label: "MB streamed / token", get: (m) => hw(m).stream, d: 1 },
+  stored: { label: "Model MB", get: (m) => hw(m).modelMb, d: 1 },
+  macs: { label: "MACs / token (M)", get: (m) => hw(m).macs / 1e6, d: 1 },
+};
+
+// ---------- overview ----------
+function renderMeta() {
+  const meta = $("#meta"); meta.textContent = "";
+  const runnable = S.models.filter((m) => m.available !== "missing").length;
+  meta.append(el("span", { text: `${S.models.length} models · ${runnable} runnable here` }),
+    el("span", { text: `device ${S.device} · source ${S.source}` }),
+    el("span", {}, "Hub: ", el("a", { href: `https://huggingface.co/${S.hf_repo}`, target: "_blank", rel: "noopener", text: S.hf_repo })));
+}
+function renderKpis() {
+  const k = $("#kpis"); k.textContent = "";
+  for (const ab of S.ablations) {
+    const ms = S.models.filter((m) => m.ablation === ab && m.results.bpb != null);
+    const base = ms.find((m) => m.id === m.baseline);
+    const variants = ms.filter((m) => m !== base);
+    const best = [...variants].sort((a, b) => a.results.bpb - b.results.bpb)[0];
+    const cheapest = [...variants].sort((a, b) => hw(a).ms - hw(b).ms || a.results.bpb - b.results.bpb)[0];
+    k.append(el("div", { class: "kpi" },
+      el("span", {}, el("i", { class: "dot", style: `background:${color(ab)}` }), `${ab} · ${ms.length} runs`),
+      el("b", { text: best ? best.name : "–" }),
+      el("span", { text: best && base ? `best variant: BPB ${fmt(best.results.bpb, 4)}, ${fmtSigned(best.results.bpb - base.results.bpb)} vs baseline` : "" }),
+      el("br"), el("span", { text: cheapest && base ? `fastest: ${cheapest.name}, ${fmt(hw(base).ms / hw(cheapest).ms, 2)}× baseline speed, ${fmtSigned(cheapest.results.bpb - base.results.bpb)} BPB` : "" })));
+  }
+}
+function renderChips() {
+  const c = $("#ablations"); c.textContent = "";
+  for (const ab of S.ablations) {
+    c.append(el("span", { class: "chip" + (hiddenAblations.has(ab) ? " off" : ""), onclick: () => {
+      hiddenAblations.has(ab) ? hiddenAblations.delete(ab) : hiddenAblations.add(ab); renderAll(); } },
+      el("i", { style: `background:${color(ab)}` }), ab));
+  }
+}
+function frontier(points, higher) {
+  const sorted = [...points].sort((a, b) => a.x - b.x || (higher ? b.y - a.y : a.y - b.y));
+  const out = []; let best = higher ? -Infinity : Infinity;
+  for (const p of sorted) if (higher ? p.y > best : p.y < best) { out.push(p); best = p.y; }
+  return out;
+}
+function renderChart() {
+  const svg = $("#chart"); svg.textContent = "";
+  const ym = Y[$("#ymetric").value], xm = X[$("#xmetric").value];
+  const pts = S.models.filter((m) => !hiddenAblations.has(m.ablation))
+    .map((m) => ({ m, x: xm.get(m), y: ym.get(m) })).filter((p) => p.x != null && p.y != null && p.y > 0);
+  const W = 900, H = 420, L = 70, R = 190, T = 18, B = 46;
+  if (!pts.length) { svg.append(Object.assign(sv("text", { x: W / 2, y: H / 2, "text-anchor": "middle" }), { textContent: "No scores for this metric yet. Run evals or pick another metric." })); return; }
+  const logy = $("#logy").checked;
+  const ty = (v) => (logy ? Math.log10(v) : v);
+  let [x0, x1] = [Math.min(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.x))];
+  let [y0, y1] = [Math.min(...pts.map((p) => ty(p.y))), Math.max(...pts.map((p) => ty(p.y)))];
+  const padx = (x1 - x0 || x1 || 1) * 0.08, pady = (y1 - y0 || Math.abs(y1) || 1) * 0.1;
+  x0 = Math.max(0, x0 - padx); x1 += padx; y0 -= pady; y1 += pady;
+  const px = (v) => L + (v - x0) / (x1 - x0) * (W - L - R);
+  const py = (v) => T + (1 - (ty(v) - y0) / (y1 - y0)) * (H - T - B);
+  for (let i = 0; i <= 5; i++) {
+    const xv = x0 + (x1 - x0) * i / 5, gx = px(xv);
+    svg.append(sv("line", { x1: gx, x2: gx, y1: T, y2: H - B, class: "grid" }));
+    svg.append(Object.assign(sv("text", { x: gx, y: H - B + 16, "text-anchor": "middle" }), { textContent: fmt(xv, xv < 10 ? 1 : 0) }));
+    const yt = y0 + (y1 - y0) * i / 5, yv = logy ? 10 ** yt : yt, gy = T + (1 - i / 5) * (H - T - B);
+    svg.append(sv("line", { x1: L, x2: W - R, y1: gy, y2: gy, class: "grid" }));
+    svg.append(Object.assign(sv("text", { x: L - 8, y: gy + 4, "text-anchor": "end" }), { textContent: fmt(yv, ym.d === 4 ? 3 : 1) }));
+  }
+  svg.append(sv("line", { x1: L, x2: W - R, y1: H - B, y2: H - B, class: "axis" }));
+  svg.append(sv("line", { x1: L, x2: L, y1: T, y2: H - B, class: "axis" }));
+  svg.append(Object.assign(sv("text", { x: (L + W - R) / 2, y: H - 8, "text-anchor": "middle" }), { textContent: xm.label }));
+  svg.append(Object.assign(sv("text", { x: 14, y: (T + H - B) / 2, transform: `rotate(-90 14 ${(T + H - B) / 2})`, "text-anchor": "middle" }), { textContent: ym.label + (logy ? " (log)" : "") }));
+  for (const ab of S.ablations) {
+    const f = frontier(pts.filter((p) => p.m.ablation === ab), ym.higher);
+    if (f.length > 1) svg.append(sv("polyline", { points: f.map((p) => `${px(p.x)},${py(p.y)}`).join(" "), fill: "none", stroke: color(ab), "stroke-width": 1.5, "stroke-dasharray": "5 4", opacity: 0.8 }));
+  }
+  const placed = [];
+  for (const p of pts.sort((a, b) => py(a.y) - py(b.y))) {
+    const cx = px(p.x), cy = py(p.y), base = p.m.id === p.m.baseline;
+    const g = sv("g", { style: "cursor:pointer" });
+    g.addEventListener("click", () => { toggleSel(p.m.id); });
+    const c = sv("circle", { cx, cy, r: selected.has(p.m.id) ? 7 : 5.5, fill: base ? "var(--panel)" : color(p.m.ablation), stroke: color(p.m.ablation), "stroke-width": base ? 2.5 : 1.5 });
+    const t = sv("title"); t.textContent = `${p.m.name} (${p.m.ablation})\n${ym.label}: ${fmt(p.y, ym.d)}\n${xm.label}: ${fmt(p.x, xm.d)}`;
+    c.append(t); g.append(c);
+    const clash = (y) => placed.some((q) => Math.abs(q.y - y) < 12 && Math.abs(q.x - cx) < 150);
+    let ly = cy + 4;
+    for (const off of [0, -12, 12, -24, 24, -36, 36, -48, 48]) {
+      const y = Math.min(H - B - 4, Math.max(T + 10, cy + 4 + off));
+      if (!clash(y)) { ly = y; break; }
+    }
+    placed.push({ x: cx, y: ly });
+    g.append(Object.assign(sv("text", { x: cx + 10, y: ly, class: "lbl" }), { textContent: p.m.name }));
+    svg.append(g);
+  }
+}
+const COLS = [
+  { key: "sel", label: "", l: true },
+  { key: "name", label: "Model", l: true, get: (m) => m.name },
+  { key: "ablation", label: "Study", l: true, get: (m) => m.ablation },
+  { key: "change", label: "Change vs baseline", l: true, get: (m) => m.change },
+  { key: "scheme", label: "Scheme", l: true, get: (m) => `${m.scheme} ${m.mode.toUpperCase()}` },
+  { key: "vocab", label: "Vocab", get: (m) => m.vocab_size },
+  { key: "bpb", label: "BPB", get: (m) => m.results.bpb, d: 4 },
+  { key: "dbpb", label: "Δ BPB", get: (m) => { const b = byId(m.baseline); return b && m.results.bpb != null ? m.results.bpb - b.results.bpb : null; }, signed: true },
+  { key: "ppl", label: "Perplexity fp / scheme", get: (m) => m.results.perplexity, show: (m) => `${fmt(m.results.perplexity_fp)} / ${fmt(m.results.perplexity)}` },
+  { key: "judge", label: "Judge", get: (m) => m.results.judge_mean, d: 2 },
+  { key: "emb", label: "Embedding params (M)", get: (m) => m.cost.embedding_params / 1e6, d: 1 },
+  { key: "params", label: "Total params (M)", get: (m) => m.cost.total_params / 1e6, d: 1 },
+  { key: "mb", label: "Model MB", get: (m) => hw(m).modelMb, d: 1 },
+  { key: "ms", label: "ms / token", get: (m) => hw(m).ms, d: 1 },
+  { key: "speed", label: "Speed vs baseline", get: (m) => { const b = byId(m.baseline); return b ? hw(b).ms / hw(m).ms : null; }, show: (m) => { const b = byId(m.baseline); return b ? fmt(hw(b).ms / hw(m).ms, 2) + "×" : "–"; } },
+  { key: "local", label: "Local eval BPB", get: localBpb, show: (m) => { const e = m.local_evals || {}; const r = e.full || e.quick; return r ? `${fmt(r.bpb, 4)} ${e.full ? "full" : "quick"}` : "–"; } },
+  { key: "avail", label: "Runs from", l: true, get: (m) => m.available },
+  { key: "hf", label: "Hugging Face", l: true, get: (m) => m.uploaded ? 1 : 0 },
+];
+function renderTable() {
+  const t = $("#table"); t.textContent = "";
+  const head = el("tr");
+  for (const c of COLS) head.append(el("th", { class: c.l ? "l" : "", text: c.label + (sortKey === c.key ? (sortDir > 0 ? " ▲" : " ▼") : ""), onclick: () => {
+    if (!c.get) return; sortDir = sortKey === c.key ? -sortDir : 1; sortKey = c.key; renderTable(); } }));
+  t.append(el("thead", {}, head));
+  let rows = S.models.filter((m) => !hiddenAblations.has(m.ablation));
+  if (sortKey) { const c = COLS.find((c) => c.key === sortKey);
+    rows = [...rows].sort((a, b) => { const va = c.get(a), vb = c.get(b);
+      if (va == null) return 1; if (vb == null) return -1; return (va > vb ? 1 : va < vb ? -1 : 0) * sortDir; }); }
+  const body = el("tbody");
+  for (const m of rows) {
+    const tr = el("tr", { class: m.id === m.baseline ? "base" : "" });
+    for (const c of COLS) {
+      let cell;
+      if (c.key === "sel") {
+        const box = el("input", { type: "checkbox" }); box.checked = selected.has(m.id);
+        box.addEventListener("change", () => toggleSel(m.id)); cell = el("td", { class: "l" }, box);
+      } else if (c.key === "name") {
+        cell = el("td", { class: "l" }, el("i", { class: "dot", style: `background:${color(m.ablation)}` }), m.name, el("div", { class: "muted", style: "font-size:11.5px", text: m.id }));
+      } else if (c.key === "hf") {
+        cell = el("td", { class: "l" }, m.uploaded ? el("a", { href: m.hf, target: "_blank", rel: "noopener", text: m.hf_path }) : el("span", { class: "muted", title: m.hf, text: "not uploaded" }));
+      } else if (c.key === "avail") {
+        cell = el("td", { class: "l " + (m.available === "missing" ? "bad" : ""), text: m.available });
+      } else {
+        const v = c.get(m);
+        const text = c.show ? c.show(m) : c.signed ? fmtSigned(v) : c.d != null ? fmt(v, c.d) : v ?? "–";
+        cell = el("td", { class: (c.l ? "l" : "num") + (c.signed && v ? (v > 0 ? " bad" : " good") : ""), text });
+      }
+      tr.append(cell);
+    }
+    body.append(tr);
+  }
+  t.append(body);
+  $("#selcount").textContent = selected.size ? `${selected.size} selected` : "";
+}
+function toggleSel(id) { selected.has(id) ? selected.delete(id) : selected.add(id); renderAll(); }
+
+// ---------- generate ----------
+let slots = [];
+function modelSelect(value, onchange) {
+  const s = el("select", { onchange: (e) => onchange(e.target.value) });
+  for (const ab of S.ablations) {
+    const g = el("optgroup", { label: ab });
+    for (const m of S.models.filter((m) => m.ablation === ab)) {
+      const o = el("option", { value: m.id, text: `${m.name}${m.available === "missing" ? " (unavailable)" : ""}` });
+      if (m.available === "missing") o.disabled = true; if (m.id === value) o.selected = true; g.append(o);
+    }
+    s.append(g);
+  }
+  return s;
+}
+function renderSlots() {
+  const box = $("#slots"); box.textContent = "";
+  slots.forEach((slot, i) => {
+    const m = byId(slot.id);
+    const q = el("select", { onchange: (e) => { slot.quant = e.target.value === "q"; } },
+      el("option", { value: "q", text: `as scored (${m.scheme} ${m.mode.toUpperCase()})` }), el("option", { value: "fp", text: "full precision (fp32)" }));
+    q.value = slot.quant ? "q" : "fp";
+    box.append(el("div", { class: "slot" },
+      el("div", { class: "row" }, el("span", { class: "muted", text: `Model ${i + 1}` }),
+        el("button", { class: "btn", style: "padding:1px 8px", title: "Remove", onclick: () => { slots.splice(i, 1); renderSlots(); } }, "×")),
+      modelSelect(slot.id, (v) => { slot.id = v; renderSlots(); }), q));
+  });
+  $("#addSlot").disabled = slots.length >= 6;
+}
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
+  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
+}
+async function poll(id, onUpdate) {
+  for (;;) { const j = await api(`/api/jobs/${id}`); onUpdate(j);
+    if (j.status === "done" || j.status === "error") return j; await new Promise((r) => setTimeout(r, 600)); }
+}
+function renderOutputs(results) {
+  const box = $("#outs"); box.textContent = "";
+  slots.forEach((slot, i) => {
+    const r = results.find((x) => x.slot === i), m = byId(slot.id);
+    const card = el("div", { class: "out" + (r && r.error ? " err" : "") },
+      el("h3", {}, el("i", { class: "dot", style: `background:${color(m.ablation)}` }), m.name),
+      el("div", { class: "sub", text: `${slot.quant ? `${m.scheme} ${m.mode.toUpperCase()}` : "fp32"} · ${m.ablation} · ${m.id}` }),
+      el("pre", { text: r ? (r.error || r.text) : "waiting…" }));
+    if (r && !r.error) card.append(el("div", { class: "foot" },
+      el("span", { text: `${r.new_tokens} new tokens` }),
+      el("span", { text: `local ${fmt(r.tokens_per_s, 0)} tok/s on ${r.device}` }),
+      el("span", { text: `modeled ${fmt(hw(m).ms, 0)} ms/token on Reef` }),
+      el("span", { text: `from ${r.source}` })));
+    box.append(card);
+  });
+}
+async function runGenerate() {
+  if (!slots.length) return;
+  const btn = $("#runGen"); btn.disabled = true; $("#genStatus").textContent = "submitting…";
+  renderOutputs([]);
+  try {
+    const job = await api("/api/generate", { slots: slots.map((s) => ({ id: s.id, quant: s.quant })),
+      prompt: $("#prompt").value, seed: +$("#seed").value, temperature: +$("#temperature").value,
+      top_k: +$("#topk").value, max_new_tokens: +$("#maxtok").value });
+    const done = await poll(job.id, (j) => { renderOutputs(j.partial); $("#genStatus").textContent = j.message; });
+    $("#genStatus").textContent = done.status === "error" ? done.error : `done · ${fmt((Date.now() / 1000 - done.created), 1)} s including model loads`;
+  } catch (e) { $("#genStatus").textContent = e.message; }
+  btn.disabled = false;
+}
+
+// ---------- evaluate ----------
+function renderEvalPick() {
+  const box = $("#evalPick"); box.textContent = "";
+  for (const m of S.models) {
+    const c = el("input", { type: "checkbox", value: m.id }); c.checked = selected.has(m.id);
+    if (m.available === "missing") c.disabled = true;
+    c.addEventListener("change", () => toggleSel(m.id));
+    box.append(el("label", {}, c, el("i", { class: "dot", style: `background:${color(m.ablation)}` }), m.name));
+  }
+}
+const jobsShown = new Map();
+function renderJobs() {
+  const box = $("#jobs"); box.textContent = "";
+  for (const j of [...jobsShown.values()].reverse()) {
+    const bar = el("div", { class: "bar" }, el("div", { style: `width:${Math.round(j.progress * 100)}%` }));
+    box.append(el("div", { class: "job" }, el("span", { text: j.label }), bar,
+      el("span", { class: "msg " + (j.status === "error" ? "bad" : ""), text: j.status === "error" ? j.error : `${j.status} · ${j.message}` })));
+  }
+}
+async function runEval() {
+  const ids = [...selected].filter((id) => byId(id).available !== "missing");
+  if (!ids.length) { alert("Tick models to evaluate first."); return; }
+  const scope = document.querySelector("input[name=scope]:checked").value;
+  try {
+    const jobs = await api("/api/eval", { ids, scope });
+    for (const j of jobs) jobsShown.set(j.id, j);
+    renderJobs();
+    await Promise.all(jobs.map((j) => poll(j.id, (u) => { jobsShown.set(u.id, u); renderJobs(); })));
+    await refresh();
+  } catch (e) { alert(e.message); }
+}
+function renderEvalTable() {
+  const t = $("#evalTable"); t.textContent = "";
+  const head = ["Model", "Scope", "Tokens", "BPB fp32", "BPB scheme", "Stored BPB (full split)", "Perplexity", "Seconds", "Device", "Finished"];
+  t.append(el("thead", {}, el("tr", {}, ...head.map((h, i) => el("th", { class: i < 2 ? "l" : "", text: h })))));
+  const body = el("tbody");
+  for (const m of S.models) for (const r of Object.values(m.local_evals || {})) {
+    body.append(el("tr", {}, el("td", { class: "l" }, el("i", { class: "dot", style: `background:${color(m.ablation)}` }), m.name),
+      el("td", { class: "l", text: r.scope }), el("td", { class: "num", text: (r.tokens / 1e6).toFixed(2) + "M" }),
+      el("td", { class: "num", text: fmt(r.bpb_fp, 4) }), el("td", { class: "num", text: fmt(r.bpb, 4) }),
+      el("td", { class: "num", text: fmt(m.results.bpb, 4) }), el("td", { class: "num", text: fmt(r.perplexity) }),
+      el("td", { class: "num", text: fmt(r.seconds, 1) }), el("td", { class: "l", text: r.device }), el("td", { class: "l", text: r.finished })));
+  }
+  if (!body.children.length) body.append(el("tr", {}, el("td", { class: "l muted", colspan: head.length, text: "No local evals yet." })));
+  t.append(body);
+}
+
+// ---------- wiring ----------
+function renderAll() { renderKpis(); renderChips(); renderChart(); renderTable(); renderEvalPick(); }
+let ready = false;
+async function refresh() {
+  S = await api("/api/state");
+  S.ablations = [...new Set(S.models.map((m) => m.ablation))];
+  if (!ready) { setupControls(); ready = true; }
+  renderMeta(); renderAll(); renderEvalTable();
+}
+function setupControls() {
+  for (const [k, v] of Object.entries(Y)) $("#ymetric").append(el("option", { value: k, text: v.label }));
+  for (const [k, v] of Object.entries(X)) $("#xmetric").append(el("option", { value: k, text: v.label }));
+  $("#link").value = S.link_mb_per_s;
+  $("#qfrac").textContent = `${Math.round(S.quick_fraction * 100)}%`;
+  const bpbs = S.models.map((m) => m.results.bpb).filter((v) => v);
+  $("#logy").checked = Math.max(...bpbs) / Math.min(...bpbs) > 2;
+  for (const id of ["#ymetric", "#xmetric", "#logy", "#link", "#onchip"]) $(id).addEventListener("input", renderAll);
+  document.querySelectorAll("nav button[data-tab]").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
+  $("#theme").addEventListener("click", () => {
+    const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+    document.documentElement.dataset.theme = dark ? "light" : "dark"; renderAll(); });
+  $("#addSlot").addEventListener("click", () => { const m = S.models.find((m) => m.available !== "missing"); if (m) { slots.push({ id: m.id, quant: true }); renderSlots(); } });
+  $("#toGenerate").addEventListener("click", () => { slotsFromSelection(); showTab("generate"); });
+  $("#toEvaluate").addEventListener("click", () => showTab("evaluate"));
+  $("#runGen").addEventListener("click", runGenerate);
+  $("#runEval").addEventListener("click", runEval);
+}
+function slotsFromSelection() {
+  const ids = [...selected].filter((id) => byId(id).available !== "missing").slice(0, 6);
+  if (ids.length) slots = ids.map((id) => ({ id, quant: true }));
+  renderSlots();
+}
+function showTab(name) {
+  document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("on", s.id === name));
+  document.querySelectorAll("nav button[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
+}
+(async () => {
+  await refresh();
+  const runnable = S.models.filter((m) => m.available !== "missing");
+  slots = runnable.slice(0, 2).map((m) => ({ id: m.id, quant: true }));
+  renderSlots(); renderAll();
+})().catch((e) => { document.querySelector("main").prepend(el("div", { class: "panel bad", text: `Could not load: ${e.message}` })); });
+</script>
+</body>
+</html>

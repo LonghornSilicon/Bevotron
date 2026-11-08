@@ -1,4 +1,5 @@
-"""bevotron: info | data | tokenizer | prepare | sweep | run | eval | sample | judge | compare."""
+"""bevotron: info | data | tokenizer | prepare | sweep | run | eval | sample | judge | compare
+| registry | hub | site."""
 
 from __future__ import annotations
 
@@ -220,6 +221,45 @@ def cmd_compare(args: argparse.Namespace) -> None:
     print(f"wrote {out} ({len(rows)} runs)")
 
 
+def cmd_registry(args: argparse.Namespace) -> None:
+    """Rebuild configs/models.json from ./runs, keeping hand-edited names and notes."""
+    from bevotron.site import registry
+
+    existing = registry.load() if registry.REGISTRY.exists() else None
+    repo = args.repo or (existing or {}).get("hf_repo") or registry.DEFAULT_REPO
+    built = registry.build(repo=repo, existing=existing)
+    registry.save(built)
+    uploaded = sum(m["uploaded"] for m in built["models"])
+    print(
+        f"wrote {registry.REGISTRY} ({len(built['models'])} models, {uploaded} uploaded to {repo})"
+    )
+
+
+def cmd_hub(args: argparse.Namespace) -> None:
+    """Upload runs to the Hugging Face Hub and mark them uploaded in configs/models.json."""
+    from bevotron.site import hub, registry
+
+    reg = registry.load()
+    known = {m["id"] for m in reg["models"]}
+    ids = args.ids or sorted(known)
+    unknown = [i for i in ids if i not in known]
+    if unknown:
+        sys.exit(f"not in {registry.REGISTRY}: {unknown}; run `bevotron registry` first")
+    repo = args.repo or reg.get("hf_repo") or registry.DEFAULT_REPO
+    done = hub.push(reg, ids, repo, private=args.private)
+    registry.save(reg)
+    print(f"uploaded {len(done)} runs to https://huggingface.co/{repo}: {' '.join(done)}")
+
+
+def cmd_site(args: argparse.Namespace) -> None:
+    """Serve the comparison site on http://localhost:<port> (this machine only)."""
+    from bevotron.site import registry
+    from bevotron.site.engine import Engine
+    from bevotron.site.server import serve
+
+    serve(Engine(registry.load(), device=args.device, source=args.source), port=args.port)
+
+
 def cmd_data(args: argparse.Namespace) -> None:
     """Write a dataset split to one UTF-8 text file (stories separated by <|endoftext|>),
     the input `bevotron tokenizer train` expects."""
@@ -300,6 +340,29 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("compare", help="write results/<ablation>.csv against the baseline")
     p.add_argument("ablation")
     p.set_defaults(func=cmd_compare)
+
+    p = sub.add_parser("registry", help="rebuild configs/models.json from ./runs")
+    p.add_argument("--repo", default=None, help="Hugging Face repo, owner/name")
+    p.set_defaults(func=cmd_registry)
+
+    p = sub.add_parser("hub", help="upload runs to the Hugging Face Hub")
+    hsub = p.add_subparsers(dest="hub_cmd", required=True)
+    h = hsub.add_parser("push", help="upload runs (default: every run in the registry)")
+    h.add_argument("ids", nargs="*")
+    h.add_argument("--repo", default=None, help="Hugging Face repo, owner/name")
+    h.add_argument("--private", action="store_true", help="create the repo as private")
+    p.set_defaults(func=cmd_hub)
+
+    p = sub.add_parser("site", help="serve the local ablation comparison site")
+    p.add_argument("--port", type=int, default=8642)
+    p.add_argument("--device", default="auto")
+    p.add_argument(
+        "--source",
+        choices=["auto", "local", "hub"],
+        default="auto",
+        help="where checkpoints come from: ./runs, the Hub, or local first (auto)",
+    )
+    p.set_defaults(func=cmd_site)
 
     p = sub.add_parser("data", help="export a dataset split as text for tokenizer training")
     p.add_argument("export", nargs="?", default="export")
