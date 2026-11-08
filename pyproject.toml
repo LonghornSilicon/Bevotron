@@ -11,7 +11,7 @@ dependencies = [
 [project.optional-dependencies]
 train = ["torch>=2.5", "datasets>=3.0", "tqdm>=4.66"]
 judge = ["anthropic>=0.40"]
-site = ["torch>=2.5", "datasets>=3.0", "huggingface_hub>=0.25", "safetensors>=0.4"]
+hub = ["torch>=2.5", "huggingface_hub>=0.25", "safetensors>=0.4"]
 
 [project.scripts]
 bevotron = "bevotron.cli:main"

@@ -1,6 +1,7 @@
 {
   "hf_repo": "LonghornSilicon/bevo-ablations",
   "about": "Every Bevotron run: the ablation it belongs to, the change from that ablation's baseline, its scores, and its folder on the Hugging Face Hub. `weights` names the folder holding the checkpoint (PTQ runs share their baseline's). Rebuild with `bevotron registry`; upload with `bevotron hub push`.",
+  "samples_note": "Every sample uses the prompt \"Once upon a time\", seed 0, temperature 0.7, top-k 50 and 150 new tokens (`bevotron sample <id> [--quant] -n 1 --max-new-tokens 150 --seed 0`). `--quant` applies the run's PTQ scheme; without it the checkpoint runs in full precision. Vocab samples are full precision. Smaller vocabularies spend more tokens per word, so their 150 tokens cover slightly less text.",
   "models": [
     {
       "id": "4c89c1af04",
@@ -76,7 +77,17 @@
         "val_loss": 1.4335433356899088,
         "val_loss_fp": 1.429907320248337,
         "checkpoint_step": 29500
-      }
+      },
+      "samples": [
+        {
+          "quant": false,
+          "text": "Once upon a time, there was a little girl named Lily. She loved to draw and color pictures of animals. One day, she drew a picture of a big, gray elephant. She was so proud of her picture that she couldn't stop drawing it.\n\nLily's mom came in and asked her what she was drawing. Lily proudly showed her the picture and her mom said, \"Wow, Lily! That's a great picture. You are very talented!\" Lily smiled and felt very happy.\n\nLater that day, Lily's friends came over to play. They all wanted to draw something too. Lily decided to lead them all some ideas on how to draw a picture of a elephant. They all had so much fun and Lily felt very proud of herself"
+        },
+        {
+          "quant": true,
+          "text": "Once upon a time, there was a little girl named Lily. She loved to draw and color pictures of animals. One day, she drew a picture of a big, gray elephant. She was so proud of her picture that she couldn't stop smiling.\n\nBut then, her little brother came and asked to play with her. He wanted to play with the elephant too. Lily didn't want to share her picture to make her brother sad, so she decided to take it off the shelf and hide it.\n\nLater that day, Lily showed her brother the picture she had drawn. He thought it was really cool and asked if he could draw with it too. But Lily said no because she wanted to keep it for herself.\n\nThe next day,"
+        }
+      ]
     },
     {
       "id": "0972284b02",
@@ -152,7 +163,13 @@
         "val_loss": 1.6590179585664315,
         "val_loss_fp": 1.429907320248337,
         "checkpoint_step": 29500
-      }
+      },
+      "samples": [
+        {
+          "quant": true,
+          "text": "Once upon a time, there was a little girl. She was only three years old and she loved to pretend. She would pretend she was a princess, a fairy, or a tent.\n\nOne day, she decided to pretend she was a fairy. She danced around her house and made up a story. She pretended she was a fairy, a fairy, and she made up lots of silly moves.\n\nBut then, her mom saw what she was pretending and she became angry. She told the little girl she was not allowed to act like that. She told the little girl to stop playing and to take care of her toys.\n\nThe little girl was sad and she knew she was not allowed to do it anymore. She knew her mom was right"
+        }
+      ]
     },
     {
       "id": "72ff842a7c",
@@ -228,7 +245,17 @@
         "val_loss": 1.7388809007355,
         "val_loss_fp": 1.679325542182998,
         "checkpoint_step": 3051
-      }
+      },
+      "samples": [
+        {
+          "quant": false,
+          "text": "Once upon a time, there was a little girl named Lily. She loved to play outside and explore the world around her. One day, she saw a big maze made of sticks. She wanted to explore it and see what was inside.\n\nLily asked her mom if she could go in the maze. Her mom said yes, but warned her to be careful because it was dark outside. Lily walked through the maze and saw many beautiful things. She had so much fun exploring and discovering new things at the maze.\nAfter a while, Lily got tired of exploring the maze. She went back to her mom and said, \"Mommy, I wanted to go back to the maze again. It was so much fun! Can we go back tomorrow?\" Her mom smiled"
+        },
+        {
+          "quant": true,
+          "text": "Once upon a time, there was a little girl named Lily. She was very happy because she loved to sing and dance. One day, she saw a big maze in the park. She wanted to go inside and see what was there.\n\nWhen she got to the maze, she found a lot of different ways to show her friends. They were all very excited to see what she was doing. Lily started to sing and dance with her friends. They all thought she was very clever and funny at the maze.\n\nAs they played in the maze, they saw other kids playing. They were all singing and dancing like they were in a fun way to dance. But then, one of the kids did something disgusting. He stepped into the maze and made it"
+        }
+      ]
     },
     {
       "id": "97c1a6468e",
@@ -304,7 +331,13 @@
         "val_loss": 5.5029512283059505,
         "val_loss_fp": 1.429907320248337,
         "checkpoint_step": 29500
-      }
+      },
+      "samples": [
+        {
+          "quant": true,
+          "text": "Once upon a time, there and one, a, the big, two of a deep, of the one, a wide, it.\n\n\n\n\n\n\n in the deep, it, the one in the way.\n\n... luckier the.\n, like in the park."
+        }
+      ]
     },
     {
       "id": "27cb45751c",
@@ -380,7 +413,13 @@
         "val_loss": 1.384208798802632,
         "val_loss_fp": 1.382440747209969,
         "checkpoint_step": 3845
-      }
+      },
+      "samples": [
+        {
+          "quant": false,
+          "text": "Once upon a time, there was a little girl named Lily. She loved to draw and color pictures. One day, she drew a pretty picture of a flower. She was so happy with it that she started to spin around and around.\n\nSuddenly, her little brother came in and saw the picture. He wanted to have it too, but Lily didn't want to share. They started to argue, and Lily got very angry. She decided to take the picture away from her brother and keep it for herself.\n\nHer brother got very upset and started to cry. Lily felt bad and realized that it wasn't nice to not share her things with her brother. She apologized and shared the picture with him. They both smiled and continued to draw together, happy"
+        }
+      ]
     },
     {
       "id": "a17e1945dd",
@@ -456,7 +495,13 @@
         "val_loss": 1.379701316592665,
         "val_loss_fp": 1.3777918275945573,
         "checkpoint_step": 3853
-      }
+      },
+      "samples": [
+        {
+          "quant": false,
+          "text": "Once upon a time, there was a little girl named Lily. She loved to draw and color pictures. One day, she drew a picture of a butterfly and showed it to her mommy. \"Look, mommy! I drew a butterfly!\" Lily said.\n\nHer mommy smiled and said, \"That's great, Lily! You're so gifted at drawing!\"\n\nLily felt proud of herself and happy that she could make something beautiful. She decided to draw another picture of a butterfly and show it to her mommy. \"Look, mommy! I drew a butterfly!\" she said.\n\nHer mommy hugged her and said, \"Wow, Lily! You're such a talented artist. I'm so proud of you.\"\n\nLily smiled and felt happy inside"
+        }
+      ]
     },
     {
       "id": "25f071f726",
@@ -532,7 +577,13 @@
         "val_loss": 1.384381333076556,
         "val_loss_fp": 1.3826993268312684,
         "checkpoint_step": 3847
-      }
+      },
+      "samples": [
+        {
+          "quant": false,
+          "text": "Once upon a time, there was a little girl. She was very sleepy and wanted to take a nap.\n\nSo she went to her bedroom and lay down on her bed. She was so sleepy. She closed her eyes and fell asleep.\n\nIn a few minutes later, her mommy came into her bedroom. She said, \"Let's play!\"\n\nThe little girl was so excited, she ran to her room and jumped into her bed. She was so happy to be sleeping at the end of the night.\n\nShe felt so safe and content in her bed. She was so happy that she had taken a nap while she was sleeping!"
+        }
+      ]
     },
     {
       "id": "1b069e964b",
@@ -608,7 +659,13 @@
         "val_loss": 1.3825864124769176,
         "val_loss_fp": 1.3807250586875053,
         "checkpoint_step": 3861
-      }
+      },
+      "samples": [
+        {
+          "quant": false,
+          "text": "Once upon a time, there was a little girl named Lily. She loved to draw and color with her crayons. One day, Lily's mom asked her to wash her hands before dinner. Lily went to the sink and put her hands in the water. \n\nAfter she finished washing her hands, Lily went to play with her toys. She played with her dolls and her blocks. Suddenly, she heard a loud noise coming from the living room. She went to investigate and saw that her mom had left a cup of juice on the table. \n\nLily's mom came into the room and saw that Lily had used her crayons to draw a picture. \"Lily, did you see the picture of the cup of juice?\" her mom asked. Lily smiled and said,"
+        }
+      ]
     },
     {
       "id": "acefd89fea",
@@ -684,7 +741,13 @@
         "val_loss": 1.378630216904265,
         "val_loss_fp": 1.3764758095091583,
         "checkpoint_step": 3885
-      }
+      },
+      "samples": [
+        {
+          "quant": false,
+          "text": "Once upon a time, there was a little girl. She was very sleepy and she wanted to take a nap. She found a nice spot in the garden and curled up. She closed her eyes and soon fell asleep.\n\nWhen she woke up, she felt a big yawn in her eye. It was time to go home. She quickly got up and walked to her house. On her way, she saw a big dog. The dog was barking very loudly and the little girl was scared.\n\nBut then she remembered she had a nap and it made her yawn again. She opened her eyes and saw that the dog was not scary. He was happy and wagged his tail. The little girl gave the dog some food and he ate it all up."
+        }
+      ]
     },
     {
       "id": "db30129050",
@@ -760,7 +823,13 @@
         "val_loss": 1.338396808692102,
         "val_loss_fp": 1.3363104764387697,
         "checkpoint_step": 4051
-      }
+      },
+      "samples": [
+        {
+          "quant": false,
+          "text": "Once upon a time, there was a little girl named Lily. She loved to draw and color with her crayons. One day, Lily's mom gave her a colorful eraser to draw with. Lily was so happy and started drawing right away.\n\nSuddenly, Lily's little brother came into the room and accidentally knocked over the eraser. Lily got upset and started to cry. But then, her mom came in and gave her a hug. She told Lily that it's okay and that she can draw a new eraser. Lily felt better and they drew a beautiful rainbow together.\n\nFrom that day on, Lily was not afraid to draw and draw with her new eraser. She even showed it to her friends and family. They"
+        }
+      ]
     }
   ]
 }

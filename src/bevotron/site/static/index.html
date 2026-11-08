@@ -35,17 +35,16 @@ nav button, .btn { border: 1px solid var(--line); background: var(--panel); colo
   padding: 6px 12px; border-radius: 7px; cursor: pointer; font: inherit; }
 nav button.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-.btn:disabled { opacity: .5; cursor: default; }
+.btn.small { padding: 2px 9px; font-size: 12.5px; }
 main { padding: 18px 20px 40px; max-width: 1500px; margin: 0 auto; }
 section.tab { display: none; } section.tab.on { display: block; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px; }
 .panel h2 { font-size: 14px; margin: 0 0 10px; }
 .controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; margin-bottom: 10px; }
 .controls label { color: var(--muted); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
-select, input[type=number], input[type=text], textarea { font: inherit; color: var(--ink);
+select, input[type=number] { font: inherit; color: var(--ink);
   background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 7px; }
 input[type=number] { width: 84px; }
-textarea { width: 100%; min-height: 56px; resize: vertical; }
 .chips { display: flex; gap: 6px; flex-wrap: wrap; }
 .chip { border: 1px solid var(--line); background: var(--chip); border-radius: 999px; padding: 3px 10px;
   cursor: pointer; font-size: 12.5px; color: var(--ink); }
@@ -59,30 +58,27 @@ svg .grid { stroke: var(--line); stroke-dasharray: 2 4; }
 .tablewrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: 13px; }
 th, td { padding: 6px 8px; border-bottom: 1px solid var(--line); text-align: right; white-space: nowrap; }
-th { color: var(--muted); font-weight: 600; font-size: 12px; cursor: pointer; user-select: none; position: sticky; top: 0; background: var(--panel); }
+th { color: var(--muted); font-weight: 600; font-size: 12px; user-select: none; background: var(--panel); }
+#table th { cursor: pointer; position: sticky; top: 0; }
 th.l, td.l { text-align: left; }
 td.num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; }
 tr.base td { background: color-mix(in srgb, var(--chip) 70%, transparent); }
 .good { color: var(--good); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+td.best { font-weight: 700; color: var(--good); }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; }
 a { color: var(--accent); }
-.slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 12px; }
-.slot { border: 1px solid var(--line); border-radius: 8px; padding: 8px; display: grid; gap: 6px; }
-.slot select { width: 100%; }
-.slot .row { display: flex; gap: 6px; align-items: center; justify-content: space-between; }
+.pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 4px 14px; margin-bottom: 4px; }
+.pick label { display: flex; gap: 6px; align-items: center; cursor: pointer; }
+.pickgroup { margin-bottom: 10px; }
+.pickgroup h3 { font-size: 12.5px; color: var(--muted); margin: 0 0 4px; display: flex; gap: 8px; align-items: center; }
+#cmp th:first-child, #cmp td:first-child { position: sticky; left: 0; background: var(--panel); text-align: left; color: var(--muted); font-weight: 600; font-size: 12px; }
+#cmp thead th { vertical-align: bottom; white-space: normal; min-width: 130px; color: var(--ink); font-size: 12.5px; }
 .outs { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
-.out { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; }
-.out h3 { font-size: 13.5px; margin: 0 0 2px; }
-.out .sub { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
-.out pre { white-space: pre-wrap; font: 13.5px/1.5 system-ui, sans-serif; margin: 0; flex: 1; }
-.out .foot { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; display: flex; flex-wrap: wrap; gap: 4px 14px; }
-.out.err pre { color: var(--bad); }
-.bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; }
-.bar > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
-.job { display: grid; grid-template-columns: 1fr 160px; gap: 4px 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
-.job .msg { color: var(--muted); font-size: 12px; grid-column: 1 / -1; }
-.pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 4px 14px; margin-bottom: 10px; }
-.pick label { display: flex; gap: 6px; align-items: center; }
+.out { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.out h3 { font-size: 13.5px; margin: 0; }
+.out .sub { color: var(--muted); font-size: 12px; }
+.out .tag { font-size: 11.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; border-top: 1px solid var(--line); padding-top: 8px; }
+.out pre { white-space: pre-wrap; font: 13.5px/1.5 system-ui, sans-serif; margin: 0; }
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 16px; }
 .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
 .kpi b { display: block; font-size: 18px; font-variant-numeric: tabular-nums; }
@@ -96,8 +92,7 @@ a { color: var(--accent); }
   <div class="meta" id="meta"></div>
   <nav>
     <button data-tab="overview" class="on">Overview</button>
-    <button data-tab="generate">Generate</button>
-    <button data-tab="evaluate">Evaluate</button>
+    <button data-tab="compare">Compare</button>
     <button id="theme" title="Switch light and dark">◐</button>
   </nav>
 </header>
@@ -115,56 +110,34 @@ a { color: var(--accent); }
       <div class="chips" id="ablations"></div>
     </div>
     <svg id="chart" viewBox="0 0 900 420" role="img" aria-label="Scatter of quality against hardware cost"></svg>
-    <p class="note">Lower-left is better. Dashed lines join each study's Pareto frontier: no other run in that study is both cheaper and better. ms/token is the bandwidth floor from eval/latency.py: bytes streamed per token ÷ link bandwidth, compute ignored.</p>
+    <p class="note">Lower-left is better. Dashed lines join each study's Pareto frontier: no other run in that study is both cheaper and better. Click a point to select it for Compare. ms/token is the bandwidth floor from eval/latency.py: bytes streamed per token ÷ link bandwidth, compute ignored.</p>
   </div>
   <div class="panel">
     <h2>All models <span class="muted" style="font-weight:400">· click a header to sort · tick rows to compare</span></h2>
     <div class="controls">
-      <button class="btn" id="toGenerate">Generate with selected</button>
-      <button class="btn" id="toEvaluate">Evaluate selected</button>
+      <button class="btn primary" id="toCompare">Compare selected</button>
+      <button class="btn" id="clearSel">Clear selection</button>
       <span class="note" id="selcount"></span>
     </div>
     <div class="tablewrap"><table id="table"></table></div>
-    <p class="note">BPB and perplexity are under each run's scheme unless marked fp. Perplexity is per token, so it only compares runs with the same vocabulary. Δ and speedup are against the baseline of the same study. Model MB is non-embedding weights + KV cache + embeddings (the output-layer table only counts when the chip runs that layer).</p>
+    <p class="note">BPB and perplexity are under each run's scheme unless marked fp. Perplexity is per token, so it only compares runs with the same vocabulary. Δ and speed are against the baseline of the same study. Model MB is non-embedding weights + KV cache + embeddings (the output-layer table only counts when the chip runs that layer).</p>
   </div>
 </section>
 
-<section class="tab" id="generate">
+<section class="tab" id="compare">
   <div class="panel">
-    <h2>Side-by-side generation</h2>
-    <div class="slots" id="slots"></div>
-    <div class="controls">
-      <button class="btn" id="addSlot">+ model</button>
-      <label>Seed <input type="number" id="seed" value="0"></label>
-      <label>Temperature <input type="number" id="temperature" value="0.7" step="0.1" min="0" max="2"></label>
-      <label>Top-k <input type="number" id="topk" value="50" min="1"></label>
-      <label>Max new tokens <input type="number" id="maxtok" value="150" min="1" max="512"></label>
-    </div>
-    <textarea id="prompt">Once upon a time</textarea>
-    <div class="controls" style="margin-top:10px">
-      <button class="btn primary" id="runGen">Generate</button>
-      <span class="note" id="genStatus"></span>
-    </div>
-    <p class="note">Same prompt and seed for every model. Local tok/s is PyTorch on this machine with fake quantization, so it says nothing about hardware speed. Use the modeled ms/token for that.</p>
-  </div>
-  <div class="outs" id="outs"></div>
-</section>
-
-<section class="tab" id="evaluate">
-  <div class="panel">
-    <h2>Run evals on this machine</h2>
-    <div class="pick" id="evalPick"></div>
-    <div class="controls">
-      <label><input type="radio" name="scope" value="quick" checked> quick: first <span id="qfrac"></span> of validation</label>
-      <label><input type="radio" name="scope" value="full"> full validation split (matches eval.json)</label>
-      <button class="btn primary" id="runEval">Run eval</button>
-    </div>
-    <div id="jobs"></div>
+    <h2>Pick models</h2>
+    <div id="picker"></div>
   </div>
   <div class="panel">
-    <h2>Local eval results</h2>
-    <div class="tablewrap"><table id="evalTable"></table></div>
-    <p class="note">Saved to results/site_evals.json. A quick eval scores the same opening stretch of text for every model, so quick numbers compare with each other, not with the stored full-split BPB.</p>
+    <h2>Side by side</h2>
+    <div class="tablewrap"><table id="cmp"></table></div>
+    <p class="note">Green marks the best value in a row among the models shown. Hardware numbers follow the link bandwidth and output-layer setting on the Overview tab.</p>
+  </div>
+  <div class="panel">
+    <h2>Saved samples</h2>
+    <p class="note" id="samplesNote" style="margin:0 0 12px"></p>
+    <div class="outs" id="outs"></div>
   </div>
 </section>
 </main>
@@ -193,6 +166,8 @@ const hiddenAblations = new Set();
 let sortKey = null, sortDir = 1;
 const palette = ["--c0", "--c1", "--c2", "--c3", "--c4", "--c5"];
 const color = (ab) => `var(${palette[S.ablations.indexOf(ab) % palette.length]})`;
+const dot = (m) => el("i", { class: "dot", style: `background:${color(m.ablation)}` });
+const schemeLabel = (m) => `${m.scheme} ${m.mode.toUpperCase()}`;
 
 // ---------- derived numbers ----------
 function hw(m) {
@@ -206,13 +181,14 @@ function hw(m) {
   };
 }
 const byId = (id) => S.models.find((m) => m.id === id);
-function localBpb(m) { const e = m.local_evals || {}; return (e.full || e.quick || {}).bpb; }
+const baseOf = (m) => byId(m.baseline);
+const dBpb = (m) => { const b = baseOf(m); return b && m.results.bpb != null ? m.results.bpb - b.results.bpb : null; };
+const speed = (m) => { const b = baseOf(m); return b ? hw(b).ms / hw(m).ms : null; };
 const Y = {
   bpb: { label: "Bits per byte (scheme)", get: (m) => m.results.bpb, d: 4 },
   bpb_fp: { label: "Bits per byte (fp32)", get: (m) => m.results.bpb_fp, d: 4 },
   perplexity: { label: "Perplexity (scheme)", get: (m) => m.results.perplexity, d: 2 },
   judge: { label: "Judge score (higher is better)", get: (m) => m.results.judge_mean, d: 2, higher: true },
-  local: { label: "Local eval BPB", get: localBpb, d: 4 },
 };
 const X = {
   ms: { label: "ms / token at link bandwidth", get: (m) => hw(m).ms, d: 1 },
@@ -224,9 +200,7 @@ const X = {
 // ---------- overview ----------
 function renderMeta() {
   const meta = $("#meta"); meta.textContent = "";
-  const runnable = S.models.filter((m) => m.available !== "missing").length;
-  meta.append(el("span", { text: `${S.models.length} models · ${runnable} runnable here` }),
-    el("span", { text: `device ${S.device} · source ${S.source}` }),
+  meta.append(el("span", { text: `${S.models.length} models · ${S.ablations.length} studies` }),
     el("span", {}, "Hub: ", el("a", { href: `https://huggingface.co/${S.hf_repo}`, target: "_blank", rel: "noopener", text: S.hf_repo })));
 }
 function renderKpis() {
@@ -241,7 +215,7 @@ function renderKpis() {
       el("span", {}, el("i", { class: "dot", style: `background:${color(ab)}` }), `${ab} · ${ms.length} runs`),
       el("b", { text: best ? best.name : "–" }),
       el("span", { text: best && base ? `best variant: BPB ${fmt(best.results.bpb, 4)}, ${fmtSigned(best.results.bpb - base.results.bpb)} vs baseline` : "" }),
-      el("br"), el("span", { text: cheapest && base ? `fastest: ${cheapest.name}, ${fmt(hw(base).ms / hw(cheapest).ms, 2)}× baseline speed, ${fmtSigned(cheapest.results.bpb - base.results.bpb)} BPB` : "" })));
+      el("br"), el("span", { text: cheapest && base ? `fastest: ${cheapest.name}, ${fmt(speed(cheapest), 2)}× baseline speed, ${fmtSigned(dBpb(cheapest))} BPB` : "" })));
   }
 }
 function renderChips() {
@@ -264,7 +238,7 @@ function renderChart() {
   const pts = S.models.filter((m) => !hiddenAblations.has(m.ablation))
     .map((m) => ({ m, x: xm.get(m), y: ym.get(m) })).filter((p) => p.x != null && p.y != null && p.y > 0);
   const W = 900, H = 420, L = 70, R = 190, T = 18, B = 46;
-  if (!pts.length) { svg.append(Object.assign(sv("text", { x: W / 2, y: H / 2, "text-anchor": "middle" }), { textContent: "No scores for this metric yet. Run evals or pick another metric." })); return; }
+  if (!pts.length) { svg.append(Object.assign(sv("text", { x: W / 2, y: H / 2, "text-anchor": "middle" }), { textContent: "No scores for this metric. Pick another one." })); return; }
   const logy = $("#logy").checked;
   const ty = (v) => (logy ? Math.log10(v) : v);
   let [x0, x1] = [Math.min(...pts.map((p) => p.x)), Math.max(...pts.map((p) => p.x))];
@@ -308,24 +282,23 @@ function renderChart() {
     svg.append(g);
   }
 }
+const hfCell = (m) => m.uploaded ? el("a", { href: m.hf, target: "_blank", rel: "noopener", text: m.hf_path }) : el("span", { class: "muted", title: m.hf, text: "not uploaded" });
 const COLS = [
   { key: "sel", label: "", l: true },
   { key: "name", label: "Model", l: true, get: (m) => m.name },
   { key: "ablation", label: "Study", l: true, get: (m) => m.ablation },
   { key: "change", label: "Change vs baseline", l: true, get: (m) => m.change },
-  { key: "scheme", label: "Scheme", l: true, get: (m) => `${m.scheme} ${m.mode.toUpperCase()}` },
+  { key: "scheme", label: "Scheme", l: true, get: schemeLabel },
   { key: "vocab", label: "Vocab", get: (m) => m.vocab_size },
   { key: "bpb", label: "BPB", get: (m) => m.results.bpb, d: 4 },
-  { key: "dbpb", label: "Δ BPB", get: (m) => { const b = byId(m.baseline); return b && m.results.bpb != null ? m.results.bpb - b.results.bpb : null; }, signed: true },
+  { key: "dbpb", label: "Δ BPB", get: dBpb, signed: true },
   { key: "ppl", label: "Perplexity fp / scheme", get: (m) => m.results.perplexity, show: (m) => `${fmt(m.results.perplexity_fp)} / ${fmt(m.results.perplexity)}` },
   { key: "judge", label: "Judge", get: (m) => m.results.judge_mean, d: 2 },
   { key: "emb", label: "Embedding params (M)", get: (m) => m.cost.embedding_params / 1e6, d: 1 },
   { key: "params", label: "Total params (M)", get: (m) => m.cost.total_params / 1e6, d: 1 },
   { key: "mb", label: "Model MB", get: (m) => hw(m).modelMb, d: 1 },
   { key: "ms", label: "ms / token", get: (m) => hw(m).ms, d: 1 },
-  { key: "speed", label: "Speed vs baseline", get: (m) => { const b = byId(m.baseline); return b ? hw(b).ms / hw(m).ms : null; }, show: (m) => { const b = byId(m.baseline); return b ? fmt(hw(b).ms / hw(m).ms, 2) + "×" : "–"; } },
-  { key: "local", label: "Local eval BPB", get: localBpb, show: (m) => { const e = m.local_evals || {}; const r = e.full || e.quick; return r ? `${fmt(r.bpb, 4)} ${e.full ? "full" : "quick"}` : "–"; } },
-  { key: "avail", label: "Runs from", l: true, get: (m) => m.available },
+  { key: "speed", label: "Speed vs baseline", get: speed, show: (m) => speed(m) == null ? "–" : fmt(speed(m), 2) + "×" },
   { key: "hf", label: "Hugging Face", l: true, get: (m) => m.uploaded ? 1 : 0 },
 ];
 function renderTable() {
@@ -344,14 +317,12 @@ function renderTable() {
     for (const c of COLS) {
       let cell;
       if (c.key === "sel") {
-        const box = el("input", { type: "checkbox" }); box.checked = selected.has(m.id);
+        const box = el("input", { type: "checkbox", "aria-label": `select ${m.name}` }); box.checked = selected.has(m.id);
         box.addEventListener("change", () => toggleSel(m.id)); cell = el("td", { class: "l" }, box);
       } else if (c.key === "name") {
-        cell = el("td", { class: "l" }, el("i", { class: "dot", style: `background:${color(m.ablation)}` }), m.name, el("div", { class: "muted", style: "font-size:11.5px", text: m.id }));
+        cell = el("td", { class: "l" }, dot(m), m.name, el("div", { class: "muted", style: "font-size:11.5px", text: m.id }));
       } else if (c.key === "hf") {
-        cell = el("td", { class: "l" }, m.uploaded ? el("a", { href: m.hf, target: "_blank", rel: "noopener", text: m.hf_path }) : el("span", { class: "muted", title: m.hf, text: "not uploaded" }));
-      } else if (c.key === "avail") {
-        cell = el("td", { class: "l " + (m.available === "missing" ? "bad" : ""), text: m.available });
+        cell = el("td", { class: "l" }, hfCell(m));
       } else {
         const v = c.get(m);
         const text = c.show ? c.show(m) : c.signed ? fmtSigned(v) : c.d != null ? fmt(v, c.d) : v ?? "–";
@@ -362,137 +333,100 @@ function renderTable() {
     body.append(tr);
   }
   t.append(body);
-  $("#selcount").textContent = selected.size ? `${selected.size} selected` : "";
+  $("#selcount").textContent = selected.size ? `${selected.size} selected` : "none selected: Compare shows the first study";
 }
 function toggleSel(id) { selected.has(id) ? selected.delete(id) : selected.add(id); renderAll(); }
 
-// ---------- generate ----------
-let slots = [];
-function modelSelect(value, onchange) {
-  const s = el("select", { onchange: (e) => onchange(e.target.value) });
+// ---------- compare ----------
+function shown() {
+  const ids = selected.size ? [...selected] : S.models.filter((m) => m.ablation === S.ablations[0]).map((m) => m.id);
+  return S.models.filter((m) => ids.includes(m.id));  // registry order: study, baseline first
+}
+function renderPicker() {
+  const box = $("#picker"); box.textContent = "";
   for (const ab of S.ablations) {
-    const g = el("optgroup", { label: ab });
-    for (const m of S.models.filter((m) => m.ablation === ab)) {
-      const o = el("option", { value: m.id, text: `${m.name}${m.available === "missing" ? " (unavailable)" : ""}` });
-      if (m.available === "missing") o.disabled = true; if (m.id === value) o.selected = true; g.append(o);
+    const ms = S.models.filter((m) => m.ablation === ab);
+    const pick = el("div", { class: "pick" });
+    for (const m of ms) {
+      const c = el("input", { type: "checkbox" }); c.checked = selected.has(m.id);
+      c.addEventListener("change", () => toggleSel(m.id));
+      pick.append(el("label", {}, c, dot(m), m.name));
     }
-    s.append(g);
-  }
-  return s;
-}
-function renderSlots() {
-  const box = $("#slots"); box.textContent = "";
-  slots.forEach((slot, i) => {
-    const m = byId(slot.id);
-    const q = el("select", { onchange: (e) => { slot.quant = e.target.value === "q"; } },
-      el("option", { value: "q", text: `as scored (${m.scheme} ${m.mode.toUpperCase()})` }), el("option", { value: "fp", text: "full precision (fp32)" }));
-    q.value = slot.quant ? "q" : "fp";
-    box.append(el("div", { class: "slot" },
-      el("div", { class: "row" }, el("span", { class: "muted", text: `Model ${i + 1}` }),
-        el("button", { class: "btn", style: "padding:1px 8px", title: "Remove", onclick: () => { slots.splice(i, 1); renderSlots(); } }, "×")),
-      modelSelect(slot.id, (v) => { slot.id = v; renderSlots(); }), q));
-  });
-  $("#addSlot").disabled = slots.length >= 6;
-}
-async function api(path, body) {
-  const r = await fetch(path, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : {});
-  const j = await r.json(); if (!r.ok) throw new Error(j.error || r.statusText); return j;
-}
-async function poll(id, onUpdate) {
-  for (;;) { const j = await api(`/api/jobs/${id}`); onUpdate(j);
-    if (j.status === "done" || j.status === "error") return j; await new Promise((r) => setTimeout(r, 600)); }
-}
-function renderOutputs(results) {
-  const box = $("#outs"); box.textContent = "";
-  slots.forEach((slot, i) => {
-    const r = results.find((x) => x.slot === i), m = byId(slot.id);
-    const card = el("div", { class: "out" + (r && r.error ? " err" : "") },
-      el("h3", {}, el("i", { class: "dot", style: `background:${color(m.ablation)}` }), m.name),
-      el("div", { class: "sub", text: `${slot.quant ? `${m.scheme} ${m.mode.toUpperCase()}` : "fp32"} · ${m.ablation} · ${m.id}` }),
-      el("pre", { text: r ? (r.error || r.text) : "waiting…" }));
-    if (r && !r.error) card.append(el("div", { class: "foot" },
-      el("span", { text: `${r.new_tokens} new tokens` }),
-      el("span", { text: `local ${fmt(r.tokens_per_s, 0)} tok/s on ${r.device}` }),
-      el("span", { text: `modeled ${fmt(hw(m).ms, 0)} ms/token on Reef` }),
-      el("span", { text: `from ${r.source}` })));
-    box.append(card);
-  });
-}
-async function runGenerate() {
-  if (!slots.length) return;
-  const btn = $("#runGen"); btn.disabled = true; $("#genStatus").textContent = "submitting…";
-  renderOutputs([]);
-  try {
-    const job = await api("/api/generate", { slots: slots.map((s) => ({ id: s.id, quant: s.quant })),
-      prompt: $("#prompt").value, seed: +$("#seed").value, temperature: +$("#temperature").value,
-      top_k: +$("#topk").value, max_new_tokens: +$("#maxtok").value });
-    const done = await poll(job.id, (j) => { renderOutputs(j.partial); $("#genStatus").textContent = j.message; });
-    $("#genStatus").textContent = done.status === "error" ? done.error : `done · ${fmt((Date.now() / 1000 - done.created), 1)} s including model loads`;
-  } catch (e) { $("#genStatus").textContent = e.message; }
-  btn.disabled = false;
-}
-
-// ---------- evaluate ----------
-function renderEvalPick() {
-  const box = $("#evalPick"); box.textContent = "";
-  for (const m of S.models) {
-    const c = el("input", { type: "checkbox", value: m.id }); c.checked = selected.has(m.id);
-    if (m.available === "missing") c.disabled = true;
-    c.addEventListener("change", () => toggleSel(m.id));
-    box.append(el("label", {}, c, el("i", { class: "dot", style: `background:${color(m.ablation)}` }), m.name));
+    box.append(el("div", { class: "pickgroup" },
+      el("h3", {}, el("i", { class: "dot", style: `background:${color(ab)}` }), ab,
+        el("button", { class: "btn small", onclick: () => { ms.forEach((m) => selected.add(m.id)); renderAll(); } }, "all"),
+        el("button", { class: "btn small", onclick: () => { ms.forEach((m) => selected.delete(m.id)); renderAll(); } }, "none")),
+      pick));
   }
 }
-const jobsShown = new Map();
-function renderJobs() {
-  const box = $("#jobs"); box.textContent = "";
-  for (const j of [...jobsShown.values()].reverse()) {
-    const bar = el("div", { class: "bar" }, el("div", { style: `width:${Math.round(j.progress * 100)}%` }));
-    box.append(el("div", { class: "job" }, el("span", { text: j.label }), bar,
-      el("span", { class: "msg " + (j.status === "error" ? "bad" : ""), text: j.status === "error" ? j.error : `${j.status} · ${j.message}` })));
-  }
-}
-async function runEval() {
-  const ids = [...selected].filter((id) => byId(id).available !== "missing");
-  if (!ids.length) { alert("Tick models to evaluate first."); return; }
-  const scope = document.querySelector("input[name=scope]:checked").value;
-  try {
-    const jobs = await api("/api/eval", { ids, scope });
-    for (const j of jobs) jobsShown.set(j.id, j);
-    renderJobs();
-    await Promise.all(jobs.map((j) => poll(j.id, (u) => { jobsShown.set(u.id, u); renderJobs(); })));
-    await refresh();
-  } catch (e) { alert(e.message); }
-}
-function renderEvalTable() {
-  const t = $("#evalTable"); t.textContent = "";
-  const head = ["Model", "Scope", "Tokens", "BPB fp32", "BPB scheme", "Stored BPB (full split)", "Perplexity", "Seconds", "Device", "Finished"];
-  t.append(el("thead", {}, el("tr", {}, ...head.map((h, i) => el("th", { class: i < 2 ? "l" : "", text: h })))));
+const ROWS = [
+  { label: "Study", show: (m) => m.ablation },
+  { label: "Change vs baseline", show: (m) => m.change },
+  { label: "Scheme", show: schemeLabel },
+  { label: "Shape", show: (m) => m.shape },
+  { label: "Vocab", get: (m) => m.vocab_size, d: 0 },
+  { label: "BPB (scheme)", get: (m) => m.results.bpb, d: 4, best: "min" },
+  { label: "Δ BPB vs study baseline", get: dBpb, signed: true },
+  { label: "BPB (fp32)", get: (m) => m.results.bpb_fp, d: 4, best: "min" },
+  { label: "Perplexity (scheme)", get: (m) => m.results.perplexity, d: 2 },
+  { label: "Judge score", get: (m) => m.results.judge_mean, d: 2, best: "max" },
+  { label: "Weight / act / KV bits", show: (m) => `${m.cost.weight_bits} / ${m.cost.act_bits} / ${m.cost.kv_bits}` },
+  { label: "Embedding params (M)", get: (m) => m.cost.embedding_params / 1e6, d: 1, best: "min" },
+  { label: "Total params (M)", get: (m) => m.cost.total_params / 1e6, d: 1, best: "min" },
+  { label: "Model MB", get: (m) => hw(m).modelMb, d: 1, best: "min" },
+  { label: "MB streamed / token", get: (m) => hw(m).stream, d: 1, best: "min" },
+  { label: "ms / token", get: (m) => hw(m).ms, d: 1, best: "min" },
+  { label: "Speed vs study baseline", get: speed, d: 2, unit: "×", best: "max" },
+  { label: "Hugging Face", cell: hfCell },
+];
+function renderCompare() {
+  const ms = shown(), t = $("#cmp"); t.textContent = "";
+  t.append(el("thead", {}, el("tr", {}, el("th", {}),
+    ...ms.map((m) => el("th", {}, dot(m), m.name, el("div", { class: "muted", style: "font-weight:400;font-size:11.5px", text: m.id }))))));
   const body = el("tbody");
-  for (const m of S.models) for (const r of Object.values(m.local_evals || {})) {
-    body.append(el("tr", {}, el("td", { class: "l" }, el("i", { class: "dot", style: `background:${color(m.ablation)}` }), m.name),
-      el("td", { class: "l", text: r.scope }), el("td", { class: "num", text: (r.tokens / 1e6).toFixed(2) + "M" }),
-      el("td", { class: "num", text: fmt(r.bpb_fp, 4) }), el("td", { class: "num", text: fmt(r.bpb, 4) }),
-      el("td", { class: "num", text: fmt(m.results.bpb, 4) }), el("td", { class: "num", text: fmt(r.perplexity) }),
-      el("td", { class: "num", text: fmt(r.seconds, 1) }), el("td", { class: "l", text: r.device }), el("td", { class: "l", text: r.finished })));
+  for (const r of ROWS) {
+    const tr = el("tr", {}, el("td", { text: r.label }));
+    const vals = ms.map((m) => (r.get ? r.get(m) : null));
+    const nums = vals.filter((v) => v != null);
+    const target = r.best && nums.length > 1 && new Set(nums.map((v) => v.toFixed(6))).size > 1 ? (r.best === "min" ? Math.min(...nums) : Math.max(...nums)) : null;
+    ms.forEach((m, i) => {
+      const v = vals[i];
+      if (r.cell) { tr.append(el("td", { class: "l" }, r.cell(m))); return; }
+      if (r.show) { tr.append(el("td", { class: "l", text: r.show(m) })); return; }
+      const text = r.signed ? fmtSigned(v) : v == null ? "–" : fmt(v, r.d) + (r.unit || "");
+      const cls = "num" + (target != null && v === target ? " best" : "") + (r.signed && v ? (v > 0 ? " bad" : " good") : "");
+      tr.append(el("td", { class: cls, text }));
+    });
+    body.append(tr);
   }
-  if (!body.children.length) body.append(el("tr", {}, el("td", { class: "l muted", colspan: head.length, text: "No local evals yet." })));
   t.append(body);
+  const outs = $("#outs"); outs.textContent = "";
+  for (const m of ms) {
+    const card = el("div", { class: "out" }, el("h3", {}, dot(m), m.name),
+      el("div", { class: "sub", text: `${m.ablation} · ${m.id} · BPB ${fmt(m.results.bpb, 4)} · ${fmt(hw(m).ms, 0)} ms/token` }));
+    if (!m.samples.length) card.append(el("pre", { class: "muted", text: "No saved sample for this run." }));
+    for (const s of m.samples) {
+      card.append(el("div", { class: "tag", text: s.quant ? `${schemeLabel(m)}, as scored` : "full precision (fp32)" }), el("pre", { text: s.text }));
+    }
+    outs.append(card);
+  }
 }
 
 // ---------- wiring ----------
-function renderAll() { renderKpis(); renderChips(); renderChart(); renderTable(); renderEvalPick(); }
-let ready = false;
-async function refresh() {
-  S = await api("/api/state");
-  S.ablations = [...new Set(S.models.map((m) => m.ablation))];
-  if (!ready) { setupControls(); ready = true; }
-  renderMeta(); renderAll(); renderEvalTable();
+function renderAll() { renderKpis(); renderChips(); renderChart(); renderTable(); renderPicker(); renderCompare(); }
+function showTab(name) {
+  document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("on", s.id === name));
+  document.querySelectorAll("nav button[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
+  window.scrollTo(0, 0);
 }
-function setupControls() {
+(async () => {
+  const r = await fetch("/api/state");
+  if (!r.ok) throw new Error(r.statusText);
+  S = await r.json();
+  S.ablations = [...new Set(S.models.map((m) => m.ablation))];
   for (const [k, v] of Object.entries(Y)) $("#ymetric").append(el("option", { value: k, text: v.label }));
   for (const [k, v] of Object.entries(X)) $("#xmetric").append(el("option", { value: k, text: v.label }));
   $("#link").value = S.link_mb_per_s;
-  $("#qfrac").textContent = `${Math.round(S.quick_fraction * 100)}%`;
   const bpbs = S.models.map((m) => m.results.bpb).filter((v) => v);
   $("#logy").checked = Math.max(...bpbs) / Math.min(...bpbs) > 2;
   for (const id of ["#ymetric", "#xmetric", "#logy", "#link", "#onchip"]) $(id).addEventListener("input", renderAll);
@@ -500,26 +434,10 @@ function setupControls() {
   $("#theme").addEventListener("click", () => {
     const dark = document.documentElement.dataset.theme ? document.documentElement.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
     document.documentElement.dataset.theme = dark ? "light" : "dark"; renderAll(); });
-  $("#addSlot").addEventListener("click", () => { const m = S.models.find((m) => m.available !== "missing"); if (m) { slots.push({ id: m.id, quant: true }); renderSlots(); } });
-  $("#toGenerate").addEventListener("click", () => { slotsFromSelection(); showTab("generate"); });
-  $("#toEvaluate").addEventListener("click", () => showTab("evaluate"));
-  $("#runGen").addEventListener("click", runGenerate);
-  $("#runEval").addEventListener("click", runEval);
-}
-function slotsFromSelection() {
-  const ids = [...selected].filter((id) => byId(id).available !== "missing").slice(0, 6);
-  if (ids.length) slots = ids.map((id) => ({ id, quant: true }));
-  renderSlots();
-}
-function showTab(name) {
-  document.querySelectorAll("section.tab").forEach((s) => s.classList.toggle("on", s.id === name));
-  document.querySelectorAll("nav button[data-tab]").forEach((b) => b.classList.toggle("on", b.dataset.tab === name));
-}
-(async () => {
-  await refresh();
-  const runnable = S.models.filter((m) => m.available !== "missing");
-  slots = runnable.slice(0, 2).map((m) => ({ id: m.id, quant: true }));
-  renderSlots(); renderAll();
+  $("#toCompare").addEventListener("click", () => showTab("compare"));
+  $("#clearSel").addEventListener("click", () => { selected.clear(); renderAll(); });
+  $("#samplesNote").textContent = S.samples_note;
+  renderMeta(); renderAll();
 })().catch((e) => { document.querySelector("main").prepend(el("div", { class: "panel bad", text: `Could not load: ${e.message}` })); });
 </script>
 </body>

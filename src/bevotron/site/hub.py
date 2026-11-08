@@ -1,4 +1,4 @@
-"""Move run folders to and from the Hugging Face Hub.
+"""Upload run folders to the Hugging Face Hub.
 
 One repo holds every run, one folder per run ID:
     <id>/config.yaml, run.json, eval.json, tokenizer.json   (every run)
@@ -84,24 +84,3 @@ def push(registry: dict, ids: list[str], repo: str, private: bool = False) -> li
         done.append(entry["id"])
     registry["hf_repo"] = repo
     return done
-
-
-def fetch(entry: dict, owner: dict) -> tuple[Path, Path]:
-    """Download (or reuse the Hub cache for) a run's tokenizer and its owner's weights."""
-    from huggingface_hub import hf_hub_download
-
-    repo = entry["hf_repo"]
-    tokenizer = hf_hub_download(repo, f"{entry['hf_path']}/{TOKENIZER}")
-    weights = hf_hub_download(owner["hf_repo"], f"{owner['hf_path']}/{WEIGHTS}")
-    return Path(tokenizer), Path(weights)
-
-
-def local_files(entry: dict, runs: Path = RUNS) -> tuple[Path, Path] | None:
-    """The same files from ./runs and ./artifacts, if this machine trained the run."""
-    from bevotron.data.prepare import resolve_tokenizer_path
-
-    ckpt = runs / entry["weights"] / "ckpt.pt"
-    tokenizer = resolve_tokenizer_path(RunConfig.from_dict(entry["config"]))
-    if ckpt.exists() and tokenizer.exists():
-        return tokenizer, ckpt
-    return None

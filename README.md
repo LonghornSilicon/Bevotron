@@ -102,27 +102,26 @@ tokenizer or changing the baseline budget).
 ## Comparison site (`bevotron site`)
 
 A page on http://localhost:8642 for weighing every ablation's quality against its hardware
-cost. It only listens on 127.0.0.1 and runs the models on this machine.
+cost. It only shows saved data, so it needs no GPU or extra packages and runs no model. It
+only listens on 127.0.0.1.
 
-    uv sync --extra site                     # torch, datasets, huggingface_hub, safetensors
     uv run bevotron registry                 # rebuild configs/models.json from ./runs
-    uv run bevotron site                     # --source auto|local|hub, --device, --port
+    uv run bevotron site                     # --port to change 8642
 
-- **Overview**: quality (BPB, perplexity, judge score or a local eval) against hardware cost
-  (ms/token at a chosen link bandwidth, MB streamed per token, model MB or MACs/token), with
-  each study's Pareto frontier. The table lists every model's change from its study's
-  baseline, scores, embedding and total params, model MB, ms/token and speedup.
-- **Generate**: up to six models side by side, each quantized as scored or at fp32, with
-  the same prompt, seed and sampling settings.
-- **Evaluate**: a quick eval on the first 5% of the validation split, or the full split
-  (the same number eval.json holds). Results are saved to `results/site_evals.json`.
+- **Overview**: quality (BPB, perplexity or judge score) against hardware cost (ms/token at
+  a chosen link bandwidth, MB streamed per token, model MB or MACs/token), with each
+  study's Pareto frontier. The table lists every model's change from its study's baseline,
+  scores, embedding and total params, model MB, ms/token and speed against the baseline.
+- **Compare**: the picked models side by side, every metric in one row with the best value
+  marked, and each model's saved samples from `results/report.md` below.
 
 `configs/models.json` lists every run: its study, the change it makes, its scores, its
-config and its folder on the Hugging Face Hub. `weights` names the run whose folder holds
-the checkpoint, because PTQ runs share their baseline's weights. Names and notes edited by
-hand survive `bevotron registry`. The site loads a model from `./runs` when this machine
-trained it, otherwise from the Hub. To publish runs for the rest of the team:
+saved samples, its config and its folder on the Hugging Face Hub. `weights` names the run
+whose folder holds the checkpoint, because PTQ runs share their baseline's weights. Names
+and notes edited by hand survive `bevotron registry`. To publish runs for the rest of the
+team:
 
+    uv sync --extra train --extra hub        # torch, huggingface_hub, safetensors
     hf auth login                            # a token with write access to the org
     uv run bevotron hub push [ids...] --repo LonghornSilicon/bevo-ablations
 
@@ -133,9 +132,7 @@ marks the runs uploaded in configs/models.json, so commit that file afterwards.
 
 Hardware cost follows `eval/latency.py`: Reef streams weights and the KV cache from the host
 for every token, so ms/token = bytes streamed / link bandwidth, compute ignored. With
-"output layer on chip" ticked, the vocab x d_model output table is streamed too. Local
-tok/s on the Generate tab is PyTorch with fake quantization and says nothing about hardware
-speed.
+"output layer on chip" ticked, the vocab x d_model output table is streamed too.
 
 ## Layout
 
@@ -147,6 +144,6 @@ speed.
     src/bevotron/train/                         loop, AdamW, warmup+cosine, checkpoints, resume
     src/bevotron/quant/                         simulated PTQ and QAT: int8, w4a8, w4a4kv4, w4a8kv4
     src/bevotron/eval/                          perplexity, bits per byte, LLM judge, memory, latency floor
-    src/bevotron/site/                          comparison site: registry, Hub push/pull, cost model, server, page
+    src/bevotron/site/                          comparison site: registry, Hub upload, cost model, server, page
     runs/<id>/                                  gitignored run outputs
     results/<study>.csv                         committed: each run vs the baseline

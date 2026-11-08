@@ -36,25 +36,13 @@ def eval_batch_size(context_len: int, batch_tokens: int) -> int:
     return max(1, min(batch_tokens, EVAL_BATCH_TOKENS) // context_len)
 
 
-def full_val_loss(
-    model,
-    data,
-    context_len: int,
-    batch_size: int,
-    device: str,
-    max_windows: int | None = None,
-    progress=None,
-) -> float:
-    """Mean cross-entropy over the whole validation array, in non-overlapping windows.
-    max_windows scores only the first windows (a quick eval); progress(fraction) is called
-    after every batch."""
+def full_val_loss(model, data, context_len: int, batch_size: int, device: str) -> float:
+    """Mean cross-entropy over the whole validation array, in non-overlapping windows."""
     import numpy as np
     import torch
 
     model.eval()
     n_windows = (len(data) - 1) // context_len
-    if max_windows is not None:
-        n_windows = min(n_windows, max_windows)
     total, count = 0.0, 0
     with torch.no_grad():
         for start in range(0, n_windows, batch_size):
@@ -76,8 +64,6 @@ def full_val_loss(
             _, loss, _ = model(x, y)
             total += loss.item() * y.numel()
             count += y.numel()
-            if progress:
-                progress(min(start + batch_size, n_windows) / n_windows)
     model.train()
     return total / count
 

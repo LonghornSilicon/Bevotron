@@ -222,7 +222,8 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
 
 def cmd_registry(args: argparse.Namespace) -> None:
-    """Rebuild configs/models.json from ./runs, keeping hand-edited names and notes."""
+    """Rebuild configs/models.json from ./runs and the report's samples, keeping
+    hand-edited names and notes."""
     from bevotron.site import registry
 
     existing = registry.load() if registry.REGISTRY.exists() else None
@@ -254,10 +255,9 @@ def cmd_hub(args: argparse.Namespace) -> None:
 def cmd_site(args: argparse.Namespace) -> None:
     """Serve the comparison site on http://localhost:<port> (this machine only)."""
     from bevotron.site import registry
-    from bevotron.site.engine import Engine
     from bevotron.site.server import serve
 
-    serve(Engine(registry.load(), device=args.device, source=args.source), port=args.port)
+    serve(registry.load(), port=args.port)
 
 
 def cmd_data(args: argparse.Namespace) -> None:
@@ -355,13 +355,6 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("site", help="serve the local ablation comparison site")
     p.add_argument("--port", type=int, default=8642)
-    p.add_argument("--device", default="auto")
-    p.add_argument(
-        "--source",
-        choices=["auto", "local", "hub"],
-        default="auto",
-        help="where checkpoints come from: ./runs, the Hub, or local first (auto)",
-    )
     p.set_defaults(func=cmd_site)
 
     p = sub.add_parser("data", help="export a dataset split as text for tokenizer training")

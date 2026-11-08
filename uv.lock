@@ -234,14 +234,13 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-judge = [
-    { name = "anthropic" },
-]
-site = [
-    { name = "datasets" },
+hub = [
     { name = "huggingface-hub" },
     { name = "safetensors" },
     { name = "torch" },
+]
+judge = [
+    { name = "anthropic" },
 ]
 train = [
     { name = "datasets" },
@@ -258,17 +257,16 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "anthropic", marker = "extra == 'judge'", specifier = ">=0.40" },
-    { name = "datasets", marker = "extra == 'site'", specifier = ">=3.0" },
     { name = "datasets", marker = "extra == 'train'", specifier = ">=3.0" },
-    { name = "huggingface-hub", marker = "extra == 'site'", specifier = ">=0.25" },
+    { name = "huggingface-hub", marker = "extra == 'hub'", specifier = ">=0.25" },
     { name = "numpy", specifier = ">=1.26" },
     { name = "pyyaml", specifier = ">=6.0" },
-    { name = "safetensors", marker = "extra == 'site'", specifier = ">=0.4" },
-    { name = "torch", marker = "extra == 'site'", specifier = ">=2.5" },
+    { name = "safetensors", marker = "extra == 'hub'", specifier = ">=0.4" },
+    { name = "torch", marker = "extra == 'hub'", specifier = ">=2.5" },
     { name = "torch", marker = "extra == 'train'", specifier = ">=2.5" },
     { name = "tqdm", marker = "extra == 'train'", specifier = ">=4.66" },
 ]
-provides-extras = ["train", "judge", "site"]
+provides-extras = ["train", "judge", "hub"]
 
 [package.metadata.requires-dev]
 dev = [

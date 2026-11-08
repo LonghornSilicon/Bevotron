@@ -1,7 +1,6 @@
-"""Comparison site: registry, hardware cost, Hub weight format, engine and HTTP guards."""
+"""Comparison site: registry, saved samples, hardware cost, Hub weight format, HTTP guards."""
 
 import http.client
-import importlib
 import json
 import math
 import socket
@@ -52,15 +51,27 @@ def write_run(runs: Path, ablation: str, overrides: dict, config: RunConfig, ckp
     return config.run_id()
 
 
+def write_report(path: Path, base: str, ptq: str) -> Path:
+    path.write_text(
+        '# Report\n\n## Samples\n\nPrompt "Once",\nseed 0.\n\n### Precision\n\n'
+        f"#### bevotron sample {base}\n\n```text\nOnce fp.\n\nSecond paragraph.\n```\n\n"
+        f"#### bevotron sample {base} --quant\n\n```text\nOnce int8.\n```\n\n"
+        f"#### bevotron sample {ptq} --quant\n\n```text\nOnce w4.\n```\n\n## After\n"
+    )
+    return path
+
+
 def test_registry_links_ptq_runs_to_baseline_weights_and_keeps_edits(tmp_path):
+    runs = tmp_path / "runs"
     base = tiny_config()
     ptq = tiny_config(**{"quant.scheme": "w4a8kv4"})
     vocab = tiny_config(**{"tokenizer.vocab_size": 300})
-    b = write_run(tmp_path, "precision", {}, base, ckpt=True)
-    p = write_run(tmp_path, "precision", {"quant.scheme": "w4a8kv4"}, ptq, ckpt=True)
-    v = write_run(tmp_path, "vocab", {"tokenizer.vocab_size": 300}, vocab, ckpt=True)
+    b = write_run(runs, "precision", {}, base, ckpt=True)
+    p = write_run(runs, "precision", {"quant.scheme": "w4a8kv4"}, ptq, ckpt=True)
+    v = write_run(runs, "vocab", {"tokenizer.vocab_size": 300}, vocab, ckpt=True)
+    report = write_report(tmp_path / "report.md", b, p)
 
-    built = registry.build(tmp_path, repo="org/bevo")
+    built = registry.build(runs, repo="org/bevo", report=report)
     by_id = {m["id"]: m for m in built["models"]}
     assert by_id[p]["weights"] == b  # PTQ shares the baseline's training key
     assert by_id[p]["baseline"] == b and by_id[v]["baseline"] is None
@@ -70,11 +81,25 @@ def test_registry_links_ptq_runs_to_baseline_weights_and_keeps_edits(tmp_path):
     assert by_id[p]["results"] == {"bpb": 0.5, "perplexity": 4.0}
     assert not any(m["uploaded"] for m in built["models"])
 
+    assert built["samples_note"] == 'Prompt "Once", seed 0.'
+    assert by_id[b]["samples"] == [
+        {"quant": False, "text": "Once fp.\n\nSecond paragraph."},
+        {"quant": True, "text": "Once int8."},
+    ]
+    assert by_id[p]["samples"] == [{"quant": True, "text": "Once w4."}]
+    assert by_id[v]["samples"] == []
+
     by_id[p]["name"], by_id[p]["uploaded"] = "hand-edited", True
-    rebuilt = {m["id"]: m for m in registry.build(tmp_path, "org/bevo", built)["models"]}
+    rebuilt = {m["id"]: m for m in registry.build(runs, "org/bevo", built, report)["models"]}
     assert rebuilt[p]["name"] == "hand-edited" and rebuilt[p]["uploaded"]
-    moved = {m["id"]: m for m in registry.build(tmp_path, "org/other", built)["models"]}
+    moved = {m["id"]: m for m in registry.build(runs, "org/other", built, report)["models"]}
     assert not moved[p]["uploaded"]  # a new repo has not received the upload
+
+
+def test_registry_without_a_report_has_no_samples(tmp_path):
+    write_run(tmp_path, "precision", {}, tiny_config(), ckpt=True)
+    built = registry.build(tmp_path, "org/bevo", report=tmp_path / "missing.md")
+    assert built["samples_note"] == "" and built["models"][0]["samples"] == []
 
 
 def test_hardware_cost_counts_streamed_bytes_per_token():
@@ -93,114 +118,37 @@ def test_hardware_cost_counts_streamed_bytes_per_token():
     assert (w4["weight_bits"], w4["act_bits"], w4["kv_bits"]) == (4, 4, 4)
 
 
-# ---- engine: needs torch ----
-
-
-@pytest.fixture
-def tiny_hub(tmp_path, monkeypatch):
-    """A tiny trained-looking run served through the Hub code path from tmp files."""
+def test_exported_weights_drop_tied_head_and_reload_exactly(tmp_path):
     torch = pytest.importorskip("torch")
-    from bevotron.models import Bevo
-    from bevotron.site import hub
-    from bevotron.tokenizer.bpe import BPETokenizer
-
-    vocab = {i: bytes([i]) for i in range(256)}
-    vocab[256] = b"<|endoftext|>"
-    tok_path = tmp_path / "tokenizer.json"
-    BPETokenizer(vocab, []).save(tok_path)
-    config = tiny_config()
-    torch.manual_seed(0)
-    model = Bevo(config)
-    ckpt = tmp_path / "ckpt.pt"
-    torch.save({"model": model.state_dict(), "step": 7, "optimizer": {}}, ckpt)
-    weights = tmp_path / "model.safetensors"
-    hub.export_weights(ckpt, weights)
-    entry = {
-        "id": "tiny",
-        "name": "tiny",
-        "ablation": "test",
-        "change": "baseline",
-        "baseline": "tiny",
-        "weights": "tiny",
-        "hf_repo": "org/bevo",
-        "hf_path": "tiny",
-        "hf": registry.hf_url("org/bevo", "tiny"),
-        "uploaded": True,
-        "notes": "",
-        "config": config.to_dict(),
-        "results": {"bpb": 1.0},
-    }
-    monkeypatch.setattr(hub, "fetch", lambda e, owner: (tok_path, weights))
-    return {"registry": {"hf_repo": "org/bevo", "models": [entry]}, "model": model, "tmp": tmp_path}
-
-
-def test_exported_weights_drop_tied_head_and_reload_exactly(tiny_hub):
-    import torch
+    pytest.importorskip("safetensors")
     from safetensors.torch import load_file
 
-    from bevotron.site.engine import Engine
+    from bevotron.models import Bevo
+    from bevotron.site import hub
 
-    saved = load_file(str(tiny_hub["tmp"] / "model.safetensors"))
+    torch.manual_seed(0)
+    model = Bevo(tiny_config())
+    ckpt = tmp_path / "ckpt.pt"
+    torch.save({"model": model.state_dict(), "step": 7, "optimizer": {}}, ckpt)
+    hub.export_weights(ckpt, tmp_path / "model.safetensors")
+
+    saved = load_file(str(tmp_path / "model.safetensors"))
     assert "lm_head.weight" not in saved and "wte.weight" in saved
-    engine = Engine(
-        tiny_hub["registry"], device="cpu", source="hub", evals_path=tiny_hub["tmp"] / "e.json"
-    )
-    assert engine.availability(tiny_hub["registry"]["models"][0]) == "hub"
-    loaded = engine.load("tiny", quant=False).model
-    for name, tensor in tiny_hub["model"].state_dict().items():
-        assert torch.equal(loaded.state_dict()[name], tensor), name
-    assert loaded.lm_head.weight is loaded.wte.weight  # re-tied after loading
+    fresh = Bevo(tiny_config())
+    missing, unexpected = fresh.load_state_dict(saved, strict=False)
+    assert missing == ["lm_head.weight"] and not unexpected
+    assert fresh.lm_head.weight is fresh.wte.weight  # still tied, so it loads the saved table
+    for name, tensor in model.state_dict().items():
+        assert torch.equal(fresh.state_dict()[name], tensor), name
 
 
-def test_engine_generates_reproducibly_and_scores_a_quick_eval(tiny_hub, monkeypatch):
-    import numpy as np
-
-    prepare = importlib.import_module("bevotron.data.prepare")
-    from bevotron.eval.quality import bits_per_byte
-    from bevotron.site.engine import Engine
-
-    evals = tiny_hub["tmp"] / "evals.json"
-    engine = Engine(tiny_hub["registry"], device="cpu", source="hub", evals_path=evals)
-    a = engine.generate("tiny", "Once", quant=True, seed=3, max_new_tokens=12)
-    b = engine.generate("tiny", "Once", quant=True, seed=3, max_new_tokens=12)
-    assert a["text"] == b["text"] and a["text"].startswith("Once")
-    assert a["scheme"] == "int8" and a["prompt_tokens"] == 4 and a["new_tokens"] <= 12
-    assert engine.generate("tiny", "Once", quant=False, max_new_tokens=4)["scheme"] == "fp32"
-
-    rng = np.random.default_rng(0)
-    data = rng.integers(0, 256, size=40 * 32 + 1).astype(np.uint16)
-    monkeypatch.setattr(prepare, "val_split", lambda config: (data, 1000, 4000))
-    seen = []
-    result = engine.evaluate("tiny", "quick", progress=lambda f, msg: seen.append(f))
-    assert result["windows"] == 2 and result["tokens"] == 64  # 5% of 40 windows
-    assert math.isclose(result["bpb"], bits_per_byte(result["val_loss"], 1000, 4000))
-    assert result["scheme"] == "int8" and seen[-1] == 1.0
-    assert json.loads(evals.read_text())["tiny"]["quick"]["bpb"] == result["bpb"]
-    full = engine.evaluate("tiny", "full")
-    assert full["windows"] == 40
-
-
-# ---- HTTP guards ----
-
-
-class FakeEngine:
-    def __init__(self, reg):
-        self.registry, self.models = reg, {m["id"]: m for m in reg["models"]}
-        self.device, self.source = "cpu", "auto"
-
-    def availability(self, entry):
-        return "missing"
-
-    def local_evals(self):
-        return {}
+# ---- HTTP ----
 
 
 @pytest.fixture
 def server():
-    from bevotron.site.engine import Jobs
     from bevotron.site.server import make_handler
 
-    cfg = tiny_config()
     entry = {
         "id": "tiny",
         "name": "tiny",
@@ -210,50 +158,40 @@ def server():
         "hf_repo": "org/bevo",
         "hf_path": "tiny",
         "uploaded": False,
-        "config": cfg.to_dict(),
+        "config": tiny_config().to_dict(),
         "results": {},
+        "samples": [{"quant": False, "text": "Once"}],
     }
+    reg = {"hf_repo": "org/bevo", "samples_note": "note", "models": [entry]}
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         port = s.getsockname()[1]
-    srv = ThreadingHTTPServer(
-        ("127.0.0.1", port),
-        make_handler(FakeEngine({"hf_repo": "org/bevo", "models": [entry]}), Jobs(), port),
-    )
+    srv = ThreadingHTTPServer(("127.0.0.1", port), make_handler(reg, port))
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield port
     srv.shutdown()
     srv.server_close()
 
 
-def request(port, method, path, body=None, host=None, content_type="application/json"):
+def request(port, method, path, host=None):
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
-    headers = {"Host": host or f"localhost:{port}"}
-    if body is not None:
-        headers["Content-Type"] = content_type
-    conn.request(method, path, body=body, headers=headers)
+    conn.request(method, path, headers={"Host": host or f"localhost:{port}"})
     r = conn.getresponse()
-    return r.status, json.loads(r.read() or b"null") if "json" in r.getheader(
-        "Content-Type", ""
-    ) else None
+    body = r.read()
+    return r.status, json.loads(body) if "json" in r.getheader("Content-Type", "") else None
 
 
 def test_server_serves_state_and_page_to_localhost(server):
     status, state = request(server, "GET", "/api/state")
-    assert status == 200 and state["models"][0]["id"] == "tiny"
-    assert state["models"][0]["cost"]["weight_bits"] == 8 and "config" not in state["models"][0]
+    assert status == 200 and state["samples_note"] == "note"
+    model = state["models"][0]
+    assert model["id"] == "tiny" and model["samples"][0]["text"] == "Once"
+    assert model["cost"]["weight_bits"] == 8 and "config" not in model
     assert request(server, "GET", "/")[0] == 200
+    assert request(server, "GET", "/api/jobs")[0] == 404
 
 
-def test_server_rejects_other_hosts_non_json_and_bad_payloads(server):
+def test_server_rejects_other_hosts_and_writes(server):
     assert request(server, "GET", "/api/state", host="evil.example")[0] == 403
-    assert request(server, "POST", "/api/eval", "{}", host=f"attacker.test:{server}")[0] == 403
-    assert request(server, "POST", "/api/eval", "ids=tiny", content_type="text/plain")[0] == 415
-    status, body = request(server, "POST", "/api/generate", json.dumps({"slots": []}))
-    assert status == 400 and "pick" in body["error"]
-    status, body = request(server, "POST", "/api/eval", json.dumps({"ids": ["nope"]}))
-    assert status == 400 and "nope" in body["error"]
-    assert (
-        request(server, "POST", "/api/eval", json.dumps({"ids": ["tiny"], "scope": "x"}))[0] == 400
-    )
-    assert request(server, "GET", "/api/jobs/999")[0] == 404
+    assert request(server, "GET", "/", host=f"attacker.test:{server}")[0] == 403
+    assert request(server, "POST", "/api/state")[0] == 501  # read-only

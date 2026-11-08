@@ -1,10 +1,11 @@
-"""configs/models.json: every run, the ablation it belongs to, its scores, and where its
-weights live on the Hugging Face Hub. `bevotron registry` rebuilds it from ./runs; names and
-notes edited by hand survive a rebuild."""
+"""configs/models.json: every run, the ablation it belongs to, its scores, its saved
+samples, and where its weights live on the Hugging Face Hub. `bevotron registry` rebuilds it
+from ./runs and results/report.md; names and notes edited by hand survive a rebuild."""
 
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from bevotron.config import RunConfig
 
 REGISTRY = Path("configs/models.json")
 RUNS = Path("runs")
+REPORT = Path("results/report.md")
 DEFAULT_REPO = "LonghornSilicon/bevo-ablations"
 RESULT_KEYS = (
     "bpb",
@@ -28,6 +30,26 @@ KEEP = ("name", "notes")  # hand-edited fields a rebuild leaves alone
 
 def hf_url(repo: str, path: str) -> str:
     return f"https://huggingface.co/{repo}/tree/main/{path}"
+
+
+SAMPLE_HEADING = re.compile(r"^#### bevotron sample (\w+)( --quant)?", re.M)
+SAMPLE_BLOCK = re.compile(r"```text\n(.*?)\n```", re.S)
+
+
+def read_samples(report: Path = REPORT) -> tuple[str, dict[str, list[dict]]]:
+    """The report's saved samples: (how they were made, {run id: [{quant, text}]})."""
+    if not report.exists() or "## Samples" not in report.read_text():
+        return "", {}
+    section = report.read_text().split("## Samples", 1)[1]
+    note = " ".join(section.split("###", 1)[0].split())
+    samples: dict[str, list[dict]] = {}
+    for heading in SAMPLE_HEADING.finditer(section):
+        block = SAMPLE_BLOCK.search(section, heading.end())
+        if block:
+            samples.setdefault(heading.group(1), []).append(
+                {"quant": bool(heading.group(2)), "text": block.group(1)}
+            )
+    return note, samples
 
 
 def short_name(overrides: dict[str, Any], config: RunConfig, ablation: str = "") -> str:
@@ -50,9 +72,15 @@ def short_name(overrides: dict[str, Any], config: RunConfig, ablation: str = "")
     return " ".join(parts) or "baseline"
 
 
-def build(runs: Path = RUNS, repo: str = DEFAULT_REPO, existing: dict | None = None) -> dict:
+def build(
+    runs: Path = RUNS,
+    repo: str = DEFAULT_REPO,
+    existing: dict | None = None,
+    report: Path = REPORT,
+) -> dict:
     """One entry per run folder that has a config and a run.json."""
     old = {m["id"]: m for m in (existing or {}).get("models", [])}
+    samples_note, samples = read_samples(report)
     raw = []
     for run_json in sorted(runs.glob("*/run.json")):
         meta = json.loads(run_json.read_text())
@@ -85,6 +113,7 @@ def build(runs: Path = RUNS, repo: str = DEFAULT_REPO, existing: dict | None = N
             "notes": "",
             "config": config.to_dict(),
             "results": {k: result[k] for k in RESULT_KEYS if k in result},
+            "samples": samples.get(run_id, []),
         }
         prev = old.get(run_id, {})
         for key in KEEP:
@@ -109,6 +138,7 @@ def build(runs: Path = RUNS, repo: str = DEFAULT_REPO, existing: dict | None = N
             "folder holding the checkpoint (PTQ runs share their baseline's). Rebuild with "
             "`bevotron registry`; upload with `bevotron hub push`."
         ),
+        "samples_note": samples_note,
         "models": models,
     }
 
