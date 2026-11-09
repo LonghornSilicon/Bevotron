@@ -77,13 +77,20 @@ multiple of `n_kv_head` (use `pairs` to change both together).
 
 `bevotron compare <study>` writes all of these plus deltas vs the baseline to `results/<study>.csv`.
 
-## Quantization (`configs/ablations/precision.yaml`: W4A4KV4 PTQ and QAT, W4A8KV4 PTQ)
+## Quantization (`configs/ablations/precision.yaml`: W4A4KV4 and W4A8KV4, PTQ and QAT, dynamic and static scales)
 
 Train the baseline first. The PTQ rows share its training key, so `bevotron run` reuses the
 checkpoint and only evaluates; the QAT row loads that checkpoint, turns on fake quantization
 with a straight-through estimator, and fine-tunes for `quant.qat_tokens` at `quant.qat_lr`.
 Weights get one scale per output channel, activations and the KV cache one scale per token
 (per head). `bevotron sample <id> --quant` shows what the scheme does to the text.
+
+`quant.scales: static` swaps the per-token scales for one fixed scale per Linear input and per
+KV head, which an integer-only chip needs (no per-token max, and requantization folds into an
+integer multiply and shift). PTQ rows calibrate those scales at the 99.99th percentile of 128
+training windows; QAT rows start there and learn them (log scales, lr x 10, no decay), and the
+checkpoint carries them as extra `*_log_scale` entries. Left at `dynamic`, the key stays out
+of the config dict, so run IDs from before static scales existed are unchanged.
 
 A run ID hashes the whole config, so a study only lands on an already-trained baseline if it
 expands against that run's saved config. The trained baseline used the 16K-batch laptop

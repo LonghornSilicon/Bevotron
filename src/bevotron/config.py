@@ -100,6 +100,9 @@ class TrainConfig:
 class QuantConfig:
     scheme: str = "int8"  # none | int8 | w4a8 | w4a4kv4 | w4a8kv4
     mode: str = "ptq"  # ptq: quantize the trained checkpoint; qat: fine-tune with fake quant (STE)
+    # dynamic: a fresh scale per token for activations and the KV cache. static: one fixed
+    # scale per Linear input and per KV head (calibrated for PTQ, learned in QAT).
+    scales: str = "dynamic"
     # QAT starts from the trained full-precision checkpoint (PTQ comes first), then fine-tunes:
     qat_tokens: int | str = "50M"
     qat_lr: float = 1.0e-4
@@ -159,6 +162,8 @@ class RunConfig:
             problems.append("vocab_size must hold 256 bytes plus <|endoftext|>")
         if self.quant.scheme not in QUANT_BYTES:
             problems.append(f"quant.scheme must be one of {list(QUANT_BYTES)}")
+        if self.quant.scales not in ("dynamic", "static"):
+            problems.append("quant.scales must be dynamic or static")
         if self.quant.mode not in ("ptq", "qat"):
             problems.append("quant.mode must be ptq or qat")
         if self.quant.mode == "qat" and self.quant.scheme == "none":
@@ -191,7 +196,10 @@ class RunConfig:
 
     # ---- serialisation ----
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        raw = asdict(self)
+        if raw["quant"]["scales"] == "dynamic":  # the default before static scales existed;
+            del raw["quant"]["scales"]  # leaving it out keeps earlier run IDs unchanged
+        return raw
 
     def canonical_json(self) -> str:
         return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))

@@ -65,16 +65,17 @@ def generate_samples(config: RunConfig, run_dir: Path, device: str = "cpu") -> l
 
     from bevotron.data.prepare import load_split, prepare, resolve_tokenizer_path
     from bevotron.models import Bevo
-    from bevotron.quant.ptq import apply_ptq
+    from bevotron.quant.ptq import quantize_for_eval
+    from bevotron.quant.static import split_scales
     from bevotron.tokenizer.bpe import BPETokenizer
 
     e = config.eval
     meta = prepare(config)
     tok = BPETokenizer.load(resolve_tokenizer_path(config))
     model = Bevo(config).to(device)
-    model.load_state_dict(torch.load(run_dir / "ckpt.pt", map_location=device)["model"])
-    if config.quant.scheme != "none":
-        apply_ptq(model, config.quant.scheme)
+    weights, scales = split_scales(torch.load(run_dir / "ckpt.pt", map_location=device)["model"])
+    model.load_state_dict(weights)
+    quantize_for_eval(model, config, scales, device)
     model.eval()
     torch.manual_seed(config.train.seed)
     openings = story_openings(

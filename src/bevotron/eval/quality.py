@@ -75,13 +75,15 @@ def evaluate_run(config: RunConfig, run_dir: Path, device: str = "cpu") -> dict:
     from bevotron.data.prepare import load_split, prepare
     from bevotron.eval.memory import memory
     from bevotron.models import Bevo
-    from bevotron.quant.ptq import apply_ptq
+    from bevotron.quant.ptq import quantize_for_eval
+    from bevotron.quant.static import split_scales
 
     meta = prepare(config)
     val = load_split(config, "val")
     ckpt = torch.load(run_dir / "ckpt.pt", map_location=device)
     model = Bevo(config).to(device)
-    model.load_state_dict(ckpt["model"])
+    weights, scales = split_scales(ckpt["model"])
+    model.load_state_dict(weights)
     batch = eval_batch_size(config.model.context_len, config.train.batch_tokens)
 
     fp_loss = full_val_loss(model, val, config.model.context_len, batch, device)
@@ -97,7 +99,7 @@ def evaluate_run(config: RunConfig, run_dir: Path, device: str = "cpu") -> dict:
     if config.quant.scheme == "none":
         result.update(val_loss=fp_loss, bpb=result["bpb_fp"])
     else:
-        apply_ptq(model, config.quant.scheme)
+        quantize_for_eval(model, config, scales, device)
         q_loss = full_val_loss(model, val, config.model.context_len, batch, device)
         result.update(val_loss=q_loss, bpb=bits_per_byte(q_loss, meta.val_tokens, meta.val_bytes))
     result["perplexity"] = perplexity(result["val_loss"])

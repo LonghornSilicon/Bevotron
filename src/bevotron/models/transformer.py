@@ -103,11 +103,17 @@ class Bevo(nn.Module):
         return out
 
     def configure_optimizer(self, lr: float, weight_decay: float, betas=(0.9, 0.95)):
-        params = [p for p in self.parameters() if p.requires_grad]
+        from bevotron.quant.static import SCALE_LR_MULT, SCALE_SUFFIXES
+
+        named = [(n, p) for n, p in self.named_parameters() if p.requires_grad]
+        scales = [p for n, p in named if n.endswith(SCALE_SUFFIXES)]
+        params = [p for n, p in named if not n.endswith(SCALE_SUFFIXES)]
         decay = [p for p in params if p.dim() >= 2]
         no_decay = [p for p in params if p.dim() < 2]
         groups = [
             {"params": decay, "weight_decay": weight_decay},
             {"params": no_decay, "weight_decay": 0.0},
         ]
+        if scales:  # static-scale QAT; lr_scale is applied by the training loop
+            groups.append({"params": scales, "weight_decay": 0.0, "lr_scale": SCALE_LR_MULT})
         return torch.optim.AdamW(groups, lr=lr, betas=betas, fused=torch.cuda.is_available())

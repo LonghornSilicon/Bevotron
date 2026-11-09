@@ -32,7 +32,8 @@ class CausalSelfAttention(nn.Module):
         self.v_proj = nn.Linear(cfg.d_model, kv_dim, bias=False)
         self.o_proj = nn.Linear(cfg.d_model, cfg.d_model, bias=False)
         self.rope = rope
-        self.kv_quant: callable | None = None  # set by quant.ptq to fake-quantize the cache
+        # set by quant.ptq / quant.qat: (k, v) -> fake-quantized (k, v) for the cache
+        self.kv_quant: callable | None = None
 
     def forward(self, x: torch.Tensor, cache: tuple | None = None):
         bsz, t, _ = x.shape
@@ -43,7 +44,7 @@ class CausalSelfAttention(nn.Module):
         if self.rope is not None:
             q, k = self.rope(q, k, offset)
         if self.kv_quant is not None:
-            k, v = self.kv_quant(k), self.kv_quant(v)
+            k, v = self.kv_quant(k, v)
         if cache is not None:
             k = torch.cat((cache[0], k), dim=2)
             v = torch.cat((cache[1], v), dim=2)

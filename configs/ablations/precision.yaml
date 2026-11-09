@@ -8,3 +8,9 @@ pairs:
   - {quant.scheme: w4a4kv4, quant.mode: ptq}
   - {quant.scheme: w4a4kv4, quant.mode: qat}
   - {quant.scheme: w4a8kv4, quant.mode: ptq}   # 8-bit activations, 4-bit weights and KV cache
+  # Static scales: one fixed scale per Linear input and per KV head, as an integer-only chip
+  # needs. PTQ calibrates them on training windows; QAT starts there and learns them.
+  - {quant.scheme: w4a4kv4, quant.mode: ptq, quant.scales: static}
+  - {quant.scheme: w4a4kv4, quant.mode: qat, quant.scales: static}
+  - {quant.scheme: w4a8kv4, quant.mode: ptq, quant.scales: static}
+  - {quant.scheme: w4a8kv4, quant.mode: qat, quant.scales: static}

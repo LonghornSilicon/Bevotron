@@ -91,7 +91,15 @@ def train(config: RunConfig, run_dir: Path, reuse: bool = True, resume: bool = F
                 "(or the PTQ row, which shares its training key) first"
             )
         model.load_state_dict(torch.load(source, map_location=device)["model"])
-        apply_qat(model, config.quant.scheme)
+        scales = None
+        if config.quant.scales == "static":
+            from bevotron.quant.ptq import SCHEME_BITS
+            from bevotron.quant.static import calibrate, calibration_batches
+
+            _, a_bits, kv_bits = SCHEME_BITS[config.quant.scheme]
+            scales = calibrate(model, calibration_batches(config, device), a_bits, kv_bits)
+            print(f"QAT: static scales, {len(scales)} calibrated from training windows")
+        apply_qat(model, config.quant.scheme, scales)
         lr, steps = config.quant.qat_lr, config.quant.qat_total_tokens // t.batch_tokens
         print(f"QAT: fine-tuning from {source} for {steps:,} steps at lr {lr:.1e}")
     optimizer = model.configure_optimizer(lr, t.weight_decay)
@@ -112,7 +120,7 @@ def train(config: RunConfig, run_dir: Path, reuse: bool = True, resume: bool = F
     for step in range(start_step, steps + 1):
         step_lr = lr_at(step, steps, lr, t.warmup_frac, t.min_lr_ratio)
         for group in optimizer.param_groups:
-            group["lr"] = step_lr
+            group["lr"] = step_lr * group.get("lr_scale", 1.0)
         if step % t.eval_every == 0 or step == steps:
             val = quick_val_loss(model, val_data, config, rng, device, ctx)
             metrics.write(json.dumps({"step": step, "val_loss": val, "lr": step_lr}) + "\n")

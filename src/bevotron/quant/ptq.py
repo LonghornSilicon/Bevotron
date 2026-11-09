@@ -6,14 +6,18 @@ That is enough to measure the accuracy cost; real integer kernels live in the
 inference engine.
 
   weights      symmetric, one scale per output channel, round-to-nearest
-  activations  symmetric, one scale per token, applied to every Linear input
-  KV cache     symmetric, one scale per token per head, applied as K and V are produced
+  activations  symmetric, applied to every Linear input; one scale per token (dynamic)
+               or one fixed scale per Linear (static, quant.scales)
+  KV cache     symmetric, applied as K and V are produced; one scale per token per head
+               (dynamic) or one fixed scale per head (static)
 """
 
 from __future__ import annotations
 
 import torch
 import torch.nn as nn
+
+from bevotron.quant.static import StaticKV, calibrate, calibration_batches, fake_quantize_static
 
 # scheme -> bits for (weights, activations, KV cache); None = leave in float
 SCHEME_BITS: dict[str, tuple[int | None, int | None, int | None]] = {
@@ -38,26 +42,62 @@ def fake_quantize(x: torch.Tensor, bits: int, dim: int = -1) -> torch.Tensor:
     return torch.clamp(torch.round(x / scale), -qmax - 1, qmax) * scale
 
 
-def apply_ptq(model: nn.Module, scheme: str) -> nn.Module:
-    """Quantize a trained model in place according to `scheme`."""
+def apply_ptq(model: nn.Module, scheme: str, scales: dict | None = None) -> nn.Module:
+    """Quantize a trained model in place according to `scheme`. With `scales` (log scales
+    from QAT or calibration, see quant.static) activations and the KV cache use those fixed
+    scales; without, every token gets its own."""
     w_bits, a_bits, kv_bits = SCHEME_BITS[scheme]
-    for module in model.modules():
+    for name, module in model.named_modules():
         if isinstance(module, nn.Linear) and module.weight.dim() == 2:
             if w_bits is not None:
                 with torch.no_grad():
                     module.weight.copy_(fake_quantize(module.weight, w_bits, dim=1))
             if a_bits is not None:
-                module.register_forward_pre_hook(_activation_hook(a_bits))
+                if scales is None:
+                    module.register_forward_pre_hook(_activation_hook(a_bits))
+                else:
+                    log_scale = scales[f"{name}.act_log_scale"].to(module.weight.device)
+                    module.register_forward_pre_hook(_static_activation_hook(a_bits, log_scale))
         if kv_bits is not None and hasattr(module, "kv_quant"):
-            module.kv_quant = lambda t, b=kv_bits: fake_quantize(
-                t, b, dim=-1
-            )  # per token, per head
+            if scales is None:
+                module.kv_quant = lambda k, v, b=kv_bits: (
+                    fake_quantize(k, b, dim=-1),  # per token, per head
+                    fake_quantize(v, b, dim=-1),
+                )
+            else:
+                device = next(module.parameters()).device
+                module.kv_quant = StaticKV(
+                    kv_bits,
+                    scales[f"{name}.kv_quant.k_log_scale"].to(device),
+                    scales[f"{name}.kv_quant.v_log_scale"].to(device),
+                ).requires_grad_(False)
     return model
+
+
+def quantize_for_eval(model: nn.Module, config, scales: dict, device: str) -> nn.Module:
+    """Apply the run's scheme to a loaded model: learned static scales if the checkpoint
+    has them, calibrated ones for a static PTQ run, per-token scales otherwise."""
+    scheme = config.quant.scheme
+    if scheme == "none":
+        return model
+    if config.quant.scales != "static":
+        return apply_ptq(model, scheme)
+    if not scales:
+        _, a_bits, kv_bits = SCHEME_BITS[scheme]
+        scales = calibrate(model, calibration_batches(config, device), a_bits, kv_bits)
+    return apply_ptq(model, scheme, scales)
 
 
 def _activation_hook(bits: int):
     def hook(_module, inputs):
         x = inputs[0]
         return (fake_quantize(x, bits, dim=-1),) + tuple(inputs[1:])
+
+    return hook
+
+
+def _static_activation_hook(bits: int, log_scale: torch.Tensor):
+    def hook(_module, inputs):
+        return (fake_quantize_static(inputs[0], bits, log_scale),) + tuple(inputs[1:])
 
     return hook

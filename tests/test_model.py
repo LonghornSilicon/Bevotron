@@ -134,4 +134,5 @@ def test_kv_cache_quantization_scales_per_token():
     assert (scales[0, :, 1:].std(dim=-1) > 0).all()  # differ across tokens
     assert (scales[0, :, 0] > 5 * scales[0, :, 1:].amax(dim=-1)).all()
     model = apply_ptq(Bevo(tiny()), "w4a4kv4")
-    assert torch.equal(model.blocks[0].attn.kv_quant(x), q)
+    kq, vq = model.blocks[0].attn.kv_quant(x, x)
+    assert torch.equal(kq, q) and torch.equal(vq, q)

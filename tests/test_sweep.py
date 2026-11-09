@@ -18,7 +18,7 @@ def test_every_ablation_file_expands_and_starts_with_baseline():
         "attention": 1 + 2,
         "vocab_size": 1 + 5,
         "context_length": 1 + 2,
-        "precision": 1 + 3,
+        "precision": 1 + 7,
     }
     for path in sorted(ABLATIONS.glob("*.yaml")):
         runs = load_sweep(path, BASELINE)

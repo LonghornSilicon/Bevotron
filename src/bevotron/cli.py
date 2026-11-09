@@ -143,7 +143,8 @@ def cmd_sample(args: argparse.Namespace) -> None:
 
     from bevotron.data.prepare import resolve_tokenizer_path
     from bevotron.models import Bevo
-    from bevotron.quant.ptq import apply_ptq
+    from bevotron.quant.ptq import quantize_for_eval
+    from bevotron.quant.static import split_scales
     from bevotron.tokenizer.bpe import BPETokenizer
     from bevotron.train.loop import pick_device
 
@@ -152,9 +153,10 @@ def cmd_sample(args: argparse.Namespace) -> None:
     device = pick_device(args.device)
     tok = BPETokenizer.load(resolve_tokenizer_path(config))
     model = Bevo(config).to(device)
-    model.load_state_dict(torch.load(folder / "ckpt.pt", map_location=device)["model"])
-    if args.quant and config.quant.scheme != "none":
-        apply_ptq(model, config.quant.scheme)
+    weights, scales = split_scales(torch.load(folder / "ckpt.pt", map_location=device)["model"])
+    model.load_state_dict(weights)
+    if args.quant:
+        quantize_for_eval(model, config, scales, device)
     model.eval()
     torch.manual_seed(args.seed)
     prompt = torch.tensor([tok.encode(args.prompt)], device=device)
