@@ -120,3 +120,18 @@ def test_qat_keeps_state_dict_keys_and_passes_gradients():
     grads = [p.grad for p in model.parameters() if p.requires_grad]
     assert all(g is not None and torch.isfinite(g).all() for g in grads)
     assert any(g.abs().sum() > 0 for g in grads)
+
+
+def test_kv_cache_quantization_scales_per_token():
+    # K and V are (B, heads, T, head_dim): every token of every head gets its own scale,
+    # so one loud token cannot wash out the rest of the cache (per-channel across tokens would).
+    heads, t, head_dim = 4, 8, 16
+    x = torch.randn(1, heads, t, head_dim)
+    x[0, :, 0, :] *= 50
+    q = fake_quantize(x, 4, dim=-1)
+    scales = q.abs().amax(dim=-1) / 7  # (1, heads, T): grid step each token was rounded to
+    assert torch.allclose(scales, x.abs().amax(dim=-1) / 7)
+    assert (scales[0, :, 1:].std(dim=-1) > 0).all()  # differ across tokens
+    assert (scales[0, :, 0] > 5 * scales[0, :, 1:].amax(dim=-1)).all()
+    model = apply_ptq(Bevo(tiny()), "w4a4kv4")
+    assert torch.equal(model.blocks[0].attn.kv_quant(x), q)

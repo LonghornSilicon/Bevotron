@@ -6,3 +6,5 @@ data/cache/
 artifacts/
 *.bin
 *.pt
+data/tinystories/
+*.tgz

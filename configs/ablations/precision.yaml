@@ -1,7 +1,10 @@
 name: precision
 question: How low can precision go?
-# Order matters: the PTQ row reuses the baseline checkpoint; the QAT row fine-tunes from it.
+# Order matters: the PTQ rows reuse the baseline checkpoint; the QAT row fine-tunes from it.
+# The trained baseline (4c89c1af04) used the 16K-batch laptop config, so expand this study
+# against its saved config to land on the same run IDs:
+#   bevotron sweep configs/ablations/precision.yaml --baseline runs/4c89c1af04/config.yaml --write
 pairs:
   - {quant.scheme: w4a4kv4, quant.mode: ptq}
   - {quant.scheme: w4a4kv4, quant.mode: qat}
-# add e.g. {quant.scheme: w4a8kv4, quant.mode: ptq} to compare against 8-bit activations
+  - {quant.scheme: w4a8kv4, quant.mode: ptq}   # 8-bit activations, 4-bit weights and KV cache

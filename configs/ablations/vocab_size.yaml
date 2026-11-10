@@ -1,4 +1,19 @@
 name: vocab_size
 question: How small can vocab go?
-grid:
-  tokenizer.vocab_size: [4000, 8000, 12000, 16000, 25000]
+# Each run trains from scratch and is scored in bits per byte (perplexity is per token, so
+# it is not comparable across tokenizers). The budget holds the amount of TEXT fixed, not
+# tokens: a smaller vocabulary spends more tokens per story, so its run gets proportionally
+# more tokens. train.tokens = baseline tokens x (train split tokens at this vocab / at 50k),
+# with the split sizes from data/cache/<dataset>/<tokenizer>/meta.json after `bevotron prepare`:
+#   50000: 462,150,673 tokens (baseline, 504M-token budget)
+#    4000: 486,913,208 tokens -> x1.0536 -> 531,004,867
+#    8000: 466,999,432 tokens -> x1.0105 -> 509,287,831
+#   12000: 464,053,531 tokens -> x1.0041 -> 506,075,168
+#   16000: 463,131,783 tokens -> x1.0021 -> 505,069,953
+#   25000: 462,473,103 tokens -> x1.0007 -> 504,351,627
+pairs:
+  - {tokenizer.vocab_size: 4000, train.tokens: 531004867}
+  - {tokenizer.vocab_size: 8000, train.tokens: 509287831}
+  - {tokenizer.vocab_size: 12000, train.tokens: 506075168}
+  - {tokenizer.vocab_size: 16000, train.tokens: 505069953}
+  - {tokenizer.vocab_size: 25000, train.tokens: 504351627}

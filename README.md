@@ -7,7 +7,7 @@ One shared baseline config, one small file per study, one command to turn a stud
 ## Setup 
 
     uv sync --extra train
-    uv run pytest                                            # 52 tests to make sure everything works
+    uv run pytest                                            # 64 tests to make sure everything works
     uv run bevotron data export                              # TinyStories train split -> data/tinystories/train.txt
     uv run bevotron tokenizer train --vocab-size 50000       # artifacts/tokenizer/tokenizer_50k.json
     uv run bevotron tokenizer truncate --input artifacts/tokenizer/tokenizer_50k.json --sizes 25000 16000 12000 8000 4000
@@ -67,16 +67,72 @@ multiple of `n_kv_head` (use `pairs` to change both together).
   Default judge is Sonnet 4.6.
 - **Bits per byte**: the same loss normalized by bytes of text; use it for the vocab study,
   where per-token perplexity is not comparable across tokenizers.
-- **Memory**: weight + KV-cache bytes at the run's precision and context length.
+- **Memory**: `memory_mb` is non-embedding weight + KV-cache bytes at the run's precision
+  and context length, so it does not change with vocabulary. `embedding_mb` is the
+  embeddings as the evaluated model stores them: the output-layer table (tied, also the
+  input table) at the weight precision, and learned positions or an untied input table at
+  fp32, since PTQ and QAT round only `nn.Linear` weights. `memory_with_embedding_mb` adds
+  it: the size a chip needs if it runs the output layer, which reads the whole table for
+  every token. `embedding_params` is listed apart from `total_params` for the same reason.
 
 `bevotron compare <study>` writes all of these plus deltas vs the baseline to `results/<study>.csv`.
 
-## Quantization (`configs/ablations/precision.yaml`, W4A4KV4)
+## Quantization (`configs/ablations/precision.yaml`: W4A4KV4 PTQ and QAT, W4A8KV4 PTQ)
 
-Train the baseline first. The PTQ row shares its training key, so `bevotron run` reuses the
+Train the baseline first. The PTQ rows share its training key, so `bevotron run` reuses the
 checkpoint and only evaluates; the QAT row loads that checkpoint, turns on fake quantization
 with a straight-through estimator, and fine-tunes for `quant.qat_tokens` at `quant.qat_lr`.
-`bevotron sample <id> --quant` shows what the scheme does to the text.
+Weights get one scale per output channel, activations and the KV cache one scale per token
+(per head). `bevotron sample <id> --quant` shows what the scheme does to the text.
+
+A run ID hashes the whole config, so a study only lands on an already-trained baseline if it
+expands against that run's saved config. The trained baseline used the 16K-batch laptop
+settings, so the precision study is expanded with
+`--baseline runs/<baseline-id>/config.yaml` (see the comment in the study file).
+
+## Vocabulary (`configs/ablations/vocab_size.yaml`)
+
+Every run trains from scratch, so run this study on a data-center GPU with the 131K-batch
+baseline. Compare runs by bits per byte, not perplexity. The study holds the amount of text
+fixed rather than the token count: a smaller vocabulary spends more tokens per story, so each
+row's `train.tokens` is the baseline budget scaled by that tokenizer's train-split token count
+(the numbers and the formula are in the study file; regenerate them after retraining the
+tokenizer or changing the baseline budget).
+
+## Comparison site (`bevotron site`)
+
+A page on http://localhost:8642 for weighing every ablation's quality against its hardware
+cost. It only shows saved data, so it needs no GPU or extra packages and runs no model. It
+only listens on 127.0.0.1.
+
+    uv run bevotron registry                 # rebuild configs/models.json from ./runs
+    uv run bevotron site                     # --port to change 8642
+
+- **Overview**: quality (BPB, perplexity or judge score) against hardware cost (ms/token at
+  a chosen link bandwidth, MB streamed per token, model MB or MACs/token), with each
+  study's Pareto frontier. The table lists every model's change from its study's baseline,
+  scores, embedding and total params, model MB, ms/token and speed against the baseline.
+- **Compare**: the picked models side by side, every metric in one row with the best value
+  marked, and each model's saved samples from `results/report.md` below.
+
+`configs/models.json` lists every run: its study, the change it makes, its scores, its
+saved samples, its config and its folder on the Hugging Face Hub. `weights` names the run
+whose folder holds the checkpoint, because PTQ runs share their baseline's weights. Names
+and notes edited by hand survive `bevotron registry`. To publish runs for the rest of the
+team:
+
+    uv sync --extra train --extra hub        # torch, huggingface_hub, safetensors
+    hf auth login                            # a token with write access to the org
+    uv run bevotron hub push [ids...] --repo LonghornSilicon/bevo-ablations
+
+Each run uploads to `<repo>/<run id>/`: config.yaml, run.json, eval.json, tokenizer.json,
+and model.safetensors for runs that own a checkpoint. Weights are saved without optimizer
+state, and the tied output layer is dropped because the model re-ties it on load. The push
+marks the runs uploaded in configs/models.json, so commit that file afterwards.
+
+Hardware cost follows `eval/latency.py`: Reef streams weights and the KV cache from the host
+for every token, so ms/token = bytes streamed / link bandwidth, compute ignored. With
+"output layer on chip" ticked, the vocab x d_model output table is streamed too.
 
 ## Layout
 
@@ -88,5 +144,6 @@ with a straight-through estimator, and fine-tunes for `quant.qat_tokens` at `qua
     src/bevotron/train/                         loop, AdamW, warmup+cosine, checkpoints, resume
     src/bevotron/quant/                         simulated PTQ and QAT: int8, w4a8, w4a4kv4, w4a8kv4
     src/bevotron/eval/                          perplexity, bits per byte, LLM judge, memory, latency floor
+    src/bevotron/site/                          comparison site: registry, Hub upload, cost model, server, page
     runs/<id>/                                  gitignored run outputs
     results/<study>.csv                         committed: each run vs the baseline
