@@ -1,5 +1,5 @@
 """bevotron: info | data | tokenizer | prepare | sweep | run | eval | sample | judge | compare
-| registry | hub | site."""
+| registry | hub | site | int."""
 
 from __future__ import annotations
 
@@ -287,6 +287,80 @@ def cmd_tokenizer(args: argparse.Namespace) -> None:
             print(f"saved {size:,} tokens to {out}")
 
 
+INT_SPEC_FLAGS = (
+    "w_bits", "a_bits", "kv_bits", "out_bits", "acc_bits", "p_bits",
+    "res_bits", "logit_bits", "pos_bits", "lut_res", "lut_size",
+)  # fmt: skip
+
+
+def cmd_int(args: argparse.Namespace) -> None:
+    """Integer-only inference of a run: eval (loss on validation windows), generate, or
+    export the integer model to a file."""
+    import math
+    import time
+
+    import torch
+
+    from bevotron.data.prepare import load_split, resolve_tokenizer_path
+    from bevotron.quant import int_engine
+    from bevotron.quant.int_export import (
+        IntSpec,
+        export_run,
+        int_eval,
+        sampling_multiplier,
+        to_device,
+    )
+    from bevotron.train.loop import pick_device
+
+    folder = RUNS / args.run_id
+    config = RunConfig.load(folder / "config.yaml")
+    overrides = {f: getattr(args, f) for f in INT_SPEC_FLAGS if getattr(args, f) is not None}
+    spec = IntSpec.for_scheme(args.scheme or config.quant.scheme, **overrides)
+    device = pick_device(args.device)
+    t0 = time.time()
+    config, P = export_run(folder, spec, calibrate=args.calibrate, device=device)
+    scales = "learned" if P["meta"]["learned_scales"] else "calibrated"
+    print(f"integer model built ({scales} static scales) in {time.time() - t0:.0f}s", flush=True)
+    if args.action == "export":
+        out = Path(args.out or folder / "int_model.pt")
+        torch.save(P, out)
+        print(f"saved {out}")
+        return
+    P = to_device(P, device)
+    if args.action == "eval":
+        r = int_eval(P, load_split(config, "val"), config.model.context_len, args.windows)
+        row = {
+            "run_id": args.run_id,
+            **P["meta"]["spec"],
+            "scales": scales,
+            "windows": args.windows,
+            "val_loss": r["val_loss"],
+            "perplexity": math.exp(r["val_loss"]),
+            "max_abs": r["max_abs"],
+        }
+        print(json.dumps(row))
+        RESULTS.mkdir(exist_ok=True)
+        with open(RESULTS / "int_engine.jsonl", "a", encoding="utf-8") as f:
+            f.write(json.dumps(row) + "\n")
+        return
+    from bevotron.tokenizer.bpe import BPETokenizer
+
+    tok = BPETokenizer.load(resolve_tokenizer_path(config))
+    prompt = torch.tensor([tok.encode(args.prompt)], device=device)
+    temp = sampling_multiplier(P, args.temperature) if args.temperature > 0 else None
+    temp = to_device(temp, device)
+    gen = torch.Generator().manual_seed(args.seed)
+    for i in range(args.n):
+        out = int_engine.generate(P, prompt, args.max_new_tokens, temp, args.top_k, gen)
+        ids = out[0].tolist()
+        new = ids[prompt.shape[1] :]
+        if tok.eos_token_id in new:
+            ids = ids[: prompt.shape[1] + new.index(tok.eos_token_id)]
+        print(f"--- sample {i + 1} ---")
+        print(tok.decode(ids))
+        print()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="bevotron", description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -378,6 +452,24 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--sizes", type=int, nargs="+", required=True)
     t.add_argument("--output-dir", default="artifacts/tokenizer")
     p.set_defaults(func=cmd_tokenizer)
+
+    p = sub.add_parser("int", help="integer-only engine: eval, generate or export a run")
+    p.add_argument("action", choices=("eval", "generate", "export"))
+    p.add_argument("run_id")
+    p.add_argument("--scheme", default=None, help="bit widths to start from (default: run's)")
+    for flag in INT_SPEC_FLAGS:
+        p.add_argument(f"--{flag.replace('_', '-')}", dest=flag, type=int, default=None)
+    p.add_argument("--calibrate", action="store_true", help="ignore the run's learned scales")
+    p.add_argument("--windows", type=int, default=128, help="eval: validation windows scored")
+    p.add_argument("--prompt", default="Once upon a time")
+    p.add_argument("-n", type=int, default=1)
+    p.add_argument("--max-new-tokens", type=int, default=150)
+    p.add_argument("--temperature", type=float, default=0.0, help="0 = greedy (integer argmax)")
+    p.add_argument("--top-k", type=int, default=50)
+    p.add_argument("--seed", type=int, default=0)
+    p.add_argument("--out", default=None, help="export: file (default runs/<id>/int_model.pt)")
+    p.add_argument("--device", default="auto")
+    p.set_defaults(func=cmd_int)
 
     args = parser.parse_args(argv)
     args.func(args)

@@ -97,6 +97,28 @@ expands against that run's saved config. The trained baseline used the 16K-batch
 settings, so the precision study is expanded with
 `--baseline runs/<baseline-id>/config.yaml` (see the comment in the study file).
 
+## Integer-only inference (`bevotron int`)
+
+`quant/int_engine.py` runs bevo with integers only: int4/int8 codes, int32 matmul
+accumulators, every rescale an integer multiply plus rounding shift, LayerNorm with integer
+mean, variance, square root and division, GELU and exp as lookup tables, softmax by integer
+division, and integer logits (greedy decoding is an integer argmax). `quant/int_export.py`
+is the offline step that folds the static scales (learned by a static-QAT run, or calibrated)
+into those integers. A test runs the forward pass and generation under a guard that fails on
+any floating-point op.
+
+    uv run bevotron int eval <run_id> --windows 128             # loss on validation windows
+    uv run bevotron int eval <run_id> --a-bits 8 --acc-bits 16  # sweep any bit width
+    uv run bevotron int generate <run_id> --prompt "Once upon a time"
+    uv run bevotron int export <run_id> --out model.pt          # the integer model itself
+
+Bit widths default to the run's scheme: `--w-bits --a-bits --kv-bits`, `--out-bits` (q, o,
+up and down outputs, 8), `--acc-bits` (32, saturating below), `--p-bits` (attention
+probabilities, 8), `--res-bits` (residual stream, 16), `--logit-bits` (16), `--pos-bits` (8)
+and `--lut-res --lut-size` (exp table). Each eval appends a row to `results/int_engine.jsonl`
+with the largest value every matmul accumulator reached. Matmuls run exactly on CUDA int8
+tensor cores (`torch._int_mm`) or CPU int32, about 0.3 s per 512-token window on a laptop GPU.
+
 ## Vocabulary (`configs/ablations/vocab_size.yaml`)
 
 Every run trains from scratch, so run this study on a data-center GPU with the 131K-batch
