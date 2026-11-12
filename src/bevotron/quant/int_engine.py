@@ -11,6 +11,11 @@ inference time:
   GELU        lookup table from the up projection's output code to down's input code
   logits      integers; greedy decoding is an integer argmax, sampling uses the exp table
               and an integer random draw
+  sampled     (first_row, first_n, row_first_n; quant.hybrid) a Linear input or KV head is
+  scales      written at mid_bits with a fixed scale, the max of a sample of the matrix
+              is a runtime integer a, codes are round(x * qmax / (a * margin)) by integer
+              division, and the consumer multiplies its accumulator by a before its
+              static requantization. Cached keys and values keep a per row.
 
 quant.int_export builds the integer model (the only place floats appear, once, offline).
 tests/test_int_engine.py runs this forward pass under a mode that fails on any
@@ -88,9 +93,41 @@ def imatmul(a: torch.Tensor, b: torch.Tensor, acc_bits: int, stats: dict | None,
     return acc
 
 
-def linear(x: torch.Tensor, p: dict, acc_bits: int, stats: dict | None, key: str):
+def linear(x: torch.Tensor, p: dict, acc_bits: int, stats: dict | None, key: str, a=None):
+    """x times the integer weights, requantized to the output code. `a` is the runtime
+    factor of a sampled input scale (None for static)."""
     acc = imatmul(x, p["w"].T, acc_bits, stats, key)
+    if a is not None:
+        acc = acc * a
     return requant(acc, p["m"], p["s"], p["lo"], p["hi"])
+
+
+def quant_sampled(x: torch.Tensor, mode: str, n: int, mm, mbits: int, lo: int, hi: int):
+    """x (..., T, C) int16 holding values -> (codes, a). a is the max |value| of the
+    sample (row 0, row 0's first n values, or each row's first n), kept (..., 1, 1) or
+    (..., T, 1). codes = round(x * hi / (a * mm / 2^mbits)), clamped: one integer division
+    per value, no float."""
+    if mode == "first_row":
+        seen = x[..., :1, :]
+    elif mode == "first_n":
+        seen = x[..., :1, :n]
+    else:  # row_first_n
+        seen = x[..., :n]
+    a = seen.abs().amax(-1, keepdim=True).clamp(min=1)
+    den = a * mm
+    num = torch.bitwise_left_shift(x.abs() * hi, mbits + 1) + den
+    q = torch.div(num, 2 * den, rounding_mode="floor")  # nearest, halves away from zero
+    return (q * x.sign()).clamp(lo, hi), a
+
+
+def act_in(x: torch.Tensor, p: dict, c: dict):
+    """A Linear's input codes and runtime factor: as written (static, a = None), or
+    sampled from the int16 holding values."""
+    if c["mode"] is None:
+        return x, None
+    return quant_sampled(
+        x, c["mode"], c["scale_n"], p["mm"], c["margin_bits"], c["a_lo"], c["a_hi"]
+    )
 
 
 def isqrt(v: torch.Tensor) -> torch.Tensor:
@@ -127,12 +164,16 @@ def causal_mask(t: int, tk: int, window: int | None, device) -> torch.Tensor:
     return allowed
 
 
-def attention(q, k, v, L: dict, P: dict, stats: dict | None):
-    """q (B,H,T,hd) out_bits; k, v (B,H,Tk,hd) kv_bits. Returns (B,T,d) at o's input code."""
+def attention(q, k, v, ak, av, L: dict, P: dict, stats: dict | None):
+    """q (B,H,T,hd) out_bits; k, v (B,H,Tk,hd) kv_bits; ak, av (B,H,Tk,1) the runtime
+    factors of sampled K and V scales, or None. Returns (B,T,d) written for o's input
+    (its codes, or int16 holding values when sampled)."""
     c = P["consts"]
     t, tk = q.shape[2], k.shape[2]
     mask = causal_mask(t, tk, P["meta"]["attention_window"], q.device)[None, None]
     scores = imatmul(q, k.transpose(-1, -2), c["acc_bits"], stats, "scores")
+    if ak is not None:  # each key column at its own scale: bring them to one
+        scores = scores * ak.transpose(-1, -2)
     top = scores.masked_fill(~mask, torch.iinfo(torch.int64).min).amax(-1, keepdim=True)
     idx = requant(top - scores, L["score_m"], L["score_s"], 0, P["exp_lut"].numel() - 1)
     e = P["exp_lut"][idx] * mask
@@ -140,8 +181,10 @@ def attention(q, k, v, L: dict, P: dict, stats: dict | None):
     p_bits = c["p_bits"]
     p = torch.div(torch.bitwise_left_shift(e, p_bits) + total // 2, total, rounding_mode="floor")
     p = p.clamp(0, (1 << p_bits) - 1)
+    if av is not None:  # fold each value row's factor into its probability
+        p = p * av.transpose(-1, -2)
     pv = imatmul(p, v, c["acc_bits"], stats, "pv")  # (B,H,T,hd)
-    y = requant(pv, L["pv_m"], L["pv_s"], c["a_lo"], c["a_hi"])
+    y = requant(pv, L["pv_m"], L["pv_s"], c["in_lo"], c["in_hi"])
     b, h, _, hd = y.shape
     return y.transpose(1, 2).reshape(b, t, h * hd)
 
@@ -149,10 +192,11 @@ def attention(q, k, v, L: dict, P: dict, stats: dict | None):
 def forward(P: dict, idx: torch.Tensor, caches=None, stats: dict | None = None):
     """idx (B,T) int64 token ids -> (logits (B,T,V) int64 at the logit scale, caches)."""
     c, meta = P["consts"], P["meta"]
-    acc, a_lo, a_hi = c["acc_bits"], c["a_lo"], c["a_hi"]
+    acc = c["acc_bits"]
     r_lo, r_hi = c["res_lo"], c["res_hi"]
     frac, std_bits = c["ln_frac_bits"], c["ln_std_bits"]
     n_head, n_kv, hd = meta["n_head"], meta["n_kv_head"], meta["head_dim"]
+    in_lo, in_hi, mode = c["in_lo"], c["in_hi"], c["mode"]
     b, t = idx.shape
     offset = 0 if caches is None else caches[0][0].shape[2]
 
@@ -167,31 +211,47 @@ def forward(P: dict, idx: torch.Tensor, caches=None, stats: dict | None = None):
     for i, L in enumerate(P["layers"]):
         h = layernorm(r, L["ln1"], frac, std_bits)
         to = L["ln1"]["to"]
-        x_q, x_k, x_v = (requant(h, *to[n], a_lo, a_hi) for n in ("q", "k", "v"))
-        q = linear(x_q, L["q"], acc, stats, "q").view(b, t, n_head, hd).transpose(1, 2)
-        k = linear(x_k, L["k"], acc, stats, "k").view(b, t, n_kv, hd).transpose(1, 2)
-        v = linear(x_v, L["v"], acc, stats, "v").view(b, t, n_kv, hd).transpose(1, 2)
+        x = {n: act_in(requant(h, *to[n], in_lo, in_hi), L[n], c) for n in ("q", "k", "v")}
+        q = linear(x["q"][0], L["q"], acc, stats, "q", x["q"][1])
+        q = q.view(b, t, n_head, hd).transpose(1, 2)
+        kv = []
+        for n in ("k", "v"):
+            y = linear(x[n][0], L[n], acc, stats, n, x[n][1]).view(b, t, n_kv, hd).transpose(1, 2)
+            a = None
+            if mode is not None:  # sampled per head, the factor kept for every cached row
+                lo, hi = c["kv_lo"], c["kv_hi"]
+                y, a = quant_sampled(y, mode, c["scale_n"], L[f"{n}_mm"], c["margin_bits"], lo, hi)
+                a = a.expand(b, n_kv, t, 1)
+            kv += [y, a]
+        k, ak, v, av = kv
         if caches is not None:
             k = torch.cat((caches[i][0], k), dim=2)
             v = torch.cat((caches[i][1], v), dim=2)
-        new_caches.append((k, v))
+            if mode is not None:
+                ak = torch.cat((caches[i][2], ak), dim=2)
+                av = torch.cat((caches[i][3], av), dim=2)
+        new_caches.append((k, v, ak, av))
         if n_kv != n_head:
-            k = k.repeat_interleave(n_head // n_kv, dim=1)
-            v = v.repeat_interleave(n_head // n_kv, dim=1)
-        o = linear(attention(q, k, v, L, P, stats), L["o"], acc, stats, "o")
+            rep = n_head // n_kv
+            k, v = k.repeat_interleave(rep, dim=1), v.repeat_interleave(rep, dim=1)
+            if mode is not None:
+                ak, av = ak.repeat_interleave(rep, dim=1), av.repeat_interleave(rep, dim=1)
+        x_o, a_o = act_in(attention(q, k, v, ak, av, L, P, stats), L["o"], c)
+        o = linear(x_o, L["o"], acc, stats, "o", a_o)
         r = (r + requant(o, *L["res_attn"], r_lo, r_hi)).clamp(r_lo, r_hi)
 
         h = layernorm(r, L["ln2"], frac, std_bits)
-        u = linear(requant(h, *L["ln2"]["to"]["up"], a_lo, a_hi), L["up"], acc, stats, "up")
-        g = L["gelu_lut"][u - L["up"]["lo"]]
-        dn = linear(g, L["down"], acc, stats, "down")
+        x_up, a_up = act_in(requant(h, *L["ln2"]["to"]["up"], in_lo, in_hi), L["up"], c)
+        u = linear(x_up, L["up"], acc, stats, "up", a_up)
+        x_dn, a_dn = act_in(L["gelu_lut"][u - L["up"]["lo"]], L["down"], c)
+        dn = linear(x_dn, L["down"], acc, stats, "down", a_dn)
         r = (r + requant(dn, *L["res_mlp"], r_lo, r_hi)).clamp(r_lo, r_hi)
         if stats is not None:
             stats["residual"] = max(stats.get("residual", 0), int(r.abs().max()))
 
     h = layernorm(r, P["lnf"], frac, std_bits)
-    x = requant(h, *P["lnf"]["to"]["head"], a_lo, a_hi)
-    return linear(x, P["head"], acc, stats, "head"), new_caches
+    x, a = act_in(requant(h, *P["lnf"]["to"]["head"], in_lo, in_hi), P["head"], c)
+    return linear(x, P["head"], acc, stats, "head", a), new_caches
 
 
 def sample_next(P: dict, logits: torch.Tensor, temp: tuple | None, top_k: int | None, gen):

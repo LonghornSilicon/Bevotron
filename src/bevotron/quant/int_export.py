@@ -5,6 +5,13 @@ calibration text (or takes the scales a static-QAT run learned), rounds the weig
 folds every ratio of scales into an integer (multiplier, shift) pair, so that the engine
 needs nothing but integer multiplies, shifts, divisions and table lookups.
 
+With sampled scales (IntSpec.scales first_row, first_n or row_first_n, see quant.hybrid)
+each Linear input and each KV head is first written at mid_bits (int16) with a fixed
+scale, the max of a sample of that matrix becomes a runtime integer `a`, and the codes are
+round(x * qmax / (a * margin)) by integer division. The real scale of a code is then a
+times a fixed unit, so every consumer's (multiplier, shift) is static and the engine
+multiplies the accumulator by `a` before requantizing.
+
 The scoring helpers (`int_eval`) turn the engine's integer logits into a cross-entropy
 loss in float. That is measurement, outside the engine, in the same way a test bench
 reads a chip's outputs.
@@ -28,6 +35,8 @@ LN_FRAC_BITS = 10  # LayerNorm's normalized value carries 10 fractional bits
 LN_STD_BITS = 8  # extra bits on the integer square root
 LN_GAMMA_BITS = 16
 EXP_BITS = 16  # exp table entries are round(exp(-i / lut_res) * 2^16)
+MARGIN_BITS = 12  # sampled-scale headroom as an integer over 2^12
+SAMPLED_M_BITS = 15  # multipliers that also take a runtime factor: acc * a * m fits int64
 
 
 @dataclass(frozen=True)
@@ -45,6 +54,11 @@ class IntSpec:
     pos_bits: int = 8  # learned position table
     lut_res: int = 32  # exp table steps per unit of score gap
     lut_size: int = 512  # exp table length; gaps past lut_size / lut_res count as 0
+    # static: fixed scales. first_row | first_n | row_first_n: sampled (quant.hybrid)
+    scales: str = "static"
+    scale_n: int = 128  # values sampled by first_n and row_first_n
+    scale_margin: float = 1.0  # headroom when the run has no learned margins
+    mid_bits: int = 16  # holding width before a sampled quantization
 
     @classmethod
     def for_scheme(cls, scheme: str, **overrides) -> IntSpec:
@@ -62,10 +76,10 @@ def _qmax(bits: int) -> int:
     return (1 << (bits - 1)) - 1
 
 
-def multiplier(ratio) -> tuple[torch.Tensor, torch.Tensor]:
-    """A positive real ratio as int64 (m, s) with ratio ~= m / 2^s and m in [2^30, 2^31)."""
+def multiplier(ratio, bits: int = 31) -> tuple[torch.Tensor, torch.Tensor]:
+    """A positive real ratio as int64 (m, s) with ratio ~= m / 2^s, m in [2^(bits-1), 2^bits)."""
     r = torch.as_tensor(ratio, dtype=torch.float64).clamp(min=1e-30)
-    s = (30 - torch.floor(torch.log2(r))).clamp(1, 62).to(torch.int64)
+    s = (bits - 1 - torch.floor(torch.log2(r))).clamp(1, 62).to(torch.int64)
     m = torch.round(r * torch.pow(2.0, s.to(torch.float64))).to(torch.int64)
     return m, s
 
@@ -132,7 +146,8 @@ def collect(model: nn.Module, batches) -> dict:
 def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = None) -> dict:
     """The integer model for `model` (a float bevo with weights loaded). `learned` maps
     quant.static scale names to log scales from a static-QAT checkpoint; they replace the
-    calibrated Linear-input and KV scales."""
+    calibrated Linear-input and KV scales. With sampled scales (spec.scales) it maps
+    margin names to the log margins a sampled-QAT run learned."""
     cfg = model.config.model
     if cfg.norm != "layernorm" or cfg.pos_encoding != "learned" or cfg.mlp_act != "gelu":
         raise NotImplementedError("the integer engine covers the bevo preset only")
@@ -144,6 +159,28 @@ def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = N
     res_lo, res_hi = _range(spec.res_bits)
     lg_lo, lg_hi = _range(spec.logit_bits)
     n_head, n_kv, hd = cfg.n_head, cfg.n_kv_head, cfg.head_dim
+    sampled = spec.scales != "static"
+    mid_lo, mid_hi = _range(spec.mid_bits)
+    in_lo, in_hi = (mid_lo, mid_hi) if sampled else (a_lo, a_hi)  # what feeds a Linear
+    m_bits = SAMPLED_M_BITS if sampled else 31
+
+    def margin(key: str) -> torch.Tensor:
+        """Learned (or configured) headroom as an integer over 2^MARGIN_BITS."""
+        g = learned[key].double().exp() if key in learned else torch.tensor(spec.scale_margin)
+        return torch.round(g.double() * 2**MARGIN_BITS).clamp(min=1).to(torch.int64)
+
+    def mid_scale(key) -> float:  # fixed scale of the int16 holding values
+        return peak[key] * RES_MARGIN / _qmax(spec.mid_bits)
+
+    def act(name: str) -> tuple[float, float, dict]:
+        """(scale of the input codes, per unit of the runtime factor when sampled; scale
+        the producer writes at; extra Linear fields)."""
+        if not sampled:
+            s = in_scale(name)
+            return s, s, {}
+        s_mid, mm = mid_scale(f"{name}.in"), margin(f"{name}.act_log_margin")
+        unit = s_mid * float(mm) / 2**MARGIN_BITS / _qmax(spec.a_bits)
+        return unit, s_mid, {"mm": mm}
 
     def in_scale(name: str) -> float:
         key = f"{name}.act_log_scale"
@@ -160,10 +197,10 @@ def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = N
 
     s_res = peak["residual"] * RES_MARGIN / _qmax(spec.res_bits)
 
-    def lin(weight, s_in: float, s_out, lo: int, hi: int) -> dict:
+    def lin(weight, s_in: float, s_out, lo: int, hi: int, extra: dict) -> dict:
         w, s_w = _quantize_rows(weight, spec.w_bits)
-        m, s = multiplier(s_in * s_w / torch.as_tensor(s_out, dtype=torch.float64))
-        return {"w": w, "m": m, "s": s, "lo": lo, "hi": hi}
+        m, s = multiplier(s_in * s_w / torch.as_tensor(s_out, dtype=torch.float64), m_bits)
+        return {"w": w, "m": m, "s": s, "lo": lo, "hi": hi, **extra}
 
     def ln(norm: nn.LayerNorm, consumers: dict[str, float]) -> dict:
         g = norm.weight.detach().double()
@@ -181,44 +218,77 @@ def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = N
         pre, attn = f"blocks.{i}", block.attn
         names = {n: f"{pre}.attn.{n}_proj" for n in ("q", "k", "v", "o")}
         up, down = f"{pre}.mlp.up", f"{pre}.mlp.down"
-        s_in = {n: in_scale(full) for n, full in names.items()}
-        s_in_up, s_in_down = in_scale(up), in_scale(down)
+        s_in, dest, extra = {}, {}, {}  # dest: the scale each Linear's input is written at
+        for n, full in [*names.items(), ("up", up), ("down", down)]:
+            s_in[n], dest[n], extra[n] = act(full)
         s_q = pct[f"{names['q']}.out"] / _qmax(spec.out_bits)
-        s_k, s_v = kv_scales(f"{pre}.attn", "k"), kv_scales(f"{pre}.attn", "v")
         per_channel = lambda s: s.repeat_interleave(hd)  # noqa: E731  one scale per head
+        kv = {}
+        for which in ("k", "v"):
+            if sampled:  # written at a fixed int16 scale per head, then sampled
+                peaks = [peak[f"{pre}.attn.{which}.{h}"] for h in range(n_kv)]
+                s_mid = torch.tensor(peaks, dtype=torch.float64) * RES_MARGIN
+                s_mid = s_mid / _qmax(spec.mid_bits)
+                mm = margin(f"{pre}.attn.kv_quant.{which}_log_margin").flatten()
+                mm = mm.expand(n_kv).clone()
+                unit = s_mid * mm.double() / 2**MARGIN_BITS / _qmax(spec.kv_bits)
+                kv[which] = (unit, s_mid, mid_lo, mid_hi, {f"{which}_mm": mm.view(1, -1, 1, 1)})
+            else:
+                s = kv_scales(f"{pre}.attn", which)
+                kv[which] = (s, s, kv_lo, kv_hi, {})
+        s_k, s_v = kv["k"][0], kv["v"][0]  # per unit of the runtime factor when sampled
         s_o = pct[f"{names['o']}.out"] / _qmax(spec.out_bits)
+        s_in_up, s_in_down = s_in["up"], s_in["down"]
         s_up = pct[f"{up}.out"] / _qmax(spec.out_bits)
         s_down = pct[f"{down}.out"] / _qmax(spec.out_bits)
         rep = n_head // n_kv
         s_k_heads, s_v_heads = s_k.repeat_interleave(rep), s_v.repeat_interleave(rep)
 
         score = s_q * s_k_heads / math.sqrt(hd) * spec.lut_res  # score gap -> exp index
-        pv = 2.0**-spec.p_bits * s_v_heads / s_in["o"]
+        pv = 2.0**-spec.p_bits * s_v_heads / dest["o"]
         gelu_in = torch.arange(out_lo, out_hi + 1, dtype=torch.float64) * s_up
         gelu = torch.nn.functional.gelu(gelu_in, approximate="tanh")
         layers.append(
             {
-                "ln1": ln(block.norm1, {n: s_in[n] for n in ("q", "k", "v")}),
-                "q": lin(attn.q_proj.weight, s_in["q"], s_q, out_lo, out_hi),
-                "k": lin(attn.k_proj.weight, s_in["k"], per_channel(s_k), kv_lo, kv_hi),
-                "v": lin(attn.v_proj.weight, s_in["v"], per_channel(s_v), kv_lo, kv_hi),
-                "score_m": multiplier(score)[0].view(1, -1, 1, 1),
-                "score_s": multiplier(score)[1].view(1, -1, 1, 1),
-                "pv_m": multiplier(pv)[0].view(1, -1, 1, 1),
-                "pv_s": multiplier(pv)[1].view(1, -1, 1, 1),
-                "o": lin(attn.o_proj.weight, s_in["o"], s_o, out_lo, out_hi),
+                "ln1": ln(block.norm1, {n: dest[n] for n in ("q", "k", "v")}),
+                "q": lin(attn.q_proj.weight, s_in["q"], s_q, out_lo, out_hi, extra["q"]),
+                "k": lin(
+                    attn.k_proj.weight,
+                    s_in["k"],
+                    per_channel(kv["k"][1]),
+                    *kv["k"][2:4],
+                    extra["k"],
+                ),
+                "v": lin(
+                    attn.v_proj.weight,
+                    s_in["v"],
+                    per_channel(kv["v"][1]),
+                    *kv["v"][2:4],
+                    extra["v"],
+                ),
+                "score_m": multiplier(score, m_bits)[0].view(1, -1, 1, 1),
+                "score_s": multiplier(score, m_bits)[1].view(1, -1, 1, 1),
+                "pv_m": multiplier(pv, m_bits)[0].view(1, -1, 1, 1),
+                "pv_s": multiplier(pv, m_bits)[1].view(1, -1, 1, 1),
+                "o": lin(attn.o_proj.weight, s_in["o"], s_o, out_lo, out_hi, extra["o"]),
                 "res_attn": multiplier(s_o / s_res),
-                "ln2": ln(block.norm2, {"up": s_in_up}),
-                "up": lin(block.mlp.up.weight, s_in_up, s_up, out_lo, out_hi),
-                "gelu_lut": torch.clamp(torch.round(gelu / s_in_down), a_lo, a_hi).to(torch.int64),
-                "down": lin(block.mlp.down.weight, s_in_down, s_down, out_lo, out_hi),
+                "ln2": ln(block.norm2, {"up": dest["up"]}),
+                "up": lin(block.mlp.up.weight, s_in_up, s_up, out_lo, out_hi, extra["up"]),
+                "gelu_lut": torch.clamp(torch.round(gelu / dest["down"]), in_lo, in_hi).to(
+                    torch.int64
+                ),
+                "down": lin(
+                    block.mlp.down.weight, s_in_down, s_down, out_lo, out_hi, extra["down"]
+                ),
                 "res_mlp": multiplier(s_down / s_res),
+                **kv["k"][4],
+                **kv["v"][4],
             }
         )
 
-    s_head = in_scale("lm_head")
+    s_head, dest_head, extra_head = act("lm_head")
     s_logit = peak["lm_head.out"] * RES_MARGIN / _qmax(spec.logit_bits)
-    head = lin(model.lm_head.weight, s_head, s_logit, lg_lo, lg_hi)
+    head = lin(model.lm_head.weight, s_head, s_logit, lg_lo, lg_hi, extra_head)
     e_q, e_s = _quantize_rows(model.wte.weight, spec.w_bits)
     pos_w = model.positions.table.weight.detach().double()
     s_pos = float(pos_w.abs().max()) / _qmax(spec.pos_bits)
@@ -236,12 +306,20 @@ def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = N
             "logit_scale": s_logit,
             "residual_scale": s_res,
             "learned_scales": bool(learned),
+            "scales": spec.scales,
         },
         "consts": {
             "acc_bits": spec.acc_bits,
             "p_bits": spec.p_bits,
             "a_lo": a_lo,
             "a_hi": a_hi,
+            "kv_lo": kv_lo,
+            "kv_hi": kv_hi,
+            "in_lo": in_lo,
+            "in_hi": in_hi,
+            "mode": spec.scales if sampled else None,
+            "scale_n": spec.scale_n,
+            "margin_bits": MARGIN_BITS,
             "res_lo": res_lo,
             "res_hi": res_hi,
             "ln_frac_bits": LN_FRAC_BITS,
@@ -253,7 +331,7 @@ def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = N
             **dict(zip(("m", "s"), multiplier(s_pos / s_res), strict=True)),
         },
         "layers": layers,
-        "lnf": ln(model.norm_f, {"head": s_head}),
+        "lnf": ln(model.norm_f, {"head": dest_head}),
         "head": head,
         "exp_lut": torch.round(torch.exp(-lut) * 2**EXP_BITS).to(torch.int64),
     }
@@ -290,14 +368,16 @@ def load_run(run_dir, device: str = "cpu"):
 
 
 def export_run(run_dir, spec: IntSpec | None = None, calibrate: bool = False, device="cpu"):
-    """The integer model for a trained run. Uses the run's learned static scales when the
-    run has them and the bit widths match its scheme, unless calibrate=True."""
+    """The integer model for a trained run. Uses the run's learned static scales (or
+    sampled-scale margins) when the run has them, the bit widths match its scheme and
+    spec.scales matches its quant.scales, unless calibrate=True."""
     from bevotron.quant.static import calibration_batches
 
     config, model, learned = load_run(run_dir, device)
     spec = spec or IntSpec.for_scheme(config.quant.scheme)
     run_bits = SCHEME_BITS[config.quant.scheme]
     use = learned and not calibrate and (spec.w_bits, spec.a_bits, spec.kv_bits) == run_bits
+    use = use and spec.scales == config.quant.scales
     stats = collect(model, calibration_batches(config, device))
     P = build(model.cpu(), spec, stats, learned if use else None)
     return config, P

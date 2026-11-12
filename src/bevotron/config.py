@@ -32,6 +32,9 @@ QUANT_BYTES: dict[str, tuple[float, float, float]] = {
 }
 
 
+SCALE_MODES = ("dynamic", "static", "first_row", "first_n", "row_first_n")
+
+
 def parse_count(value: int | str) -> int:
     """Accept 504000000, '504M', '2.1B', '16K'."""
     if isinstance(value, int):
@@ -102,7 +105,10 @@ class QuantConfig:
     mode: str = "ptq"  # ptq: quantize the trained checkpoint; qat: fine-tune with fake quant (STE)
     # dynamic: a fresh scale per token for activations and the KV cache. static: one fixed
     # scale per Linear input and per KV head (calibrated for PTQ, learned in QAT).
+    # first_row | first_n | row_first_n: sampled from part of each matrix (quant.hybrid).
     scales: str = "dynamic"
+    scale_n: int = 128  # values sampled by first_n and row_first_n
+    scale_margin: float = 1.0  # headroom on the sampled max (QAT starts here and learns it)
     # QAT starts from the trained full-precision checkpoint (PTQ comes first), then fine-tunes:
     qat_tokens: int | str = "50M"
     qat_lr: float = 1.0e-4
@@ -162,8 +168,10 @@ class RunConfig:
             problems.append("vocab_size must hold 256 bytes plus <|endoftext|>")
         if self.quant.scheme not in QUANT_BYTES:
             problems.append(f"quant.scheme must be one of {list(QUANT_BYTES)}")
-        if self.quant.scales not in ("dynamic", "static"):
-            problems.append("quant.scales must be dynamic or static")
+        if self.quant.scales not in SCALE_MODES:
+            problems.append(f"quant.scales must be one of {list(SCALE_MODES)}")
+        if self.quant.scale_n < 1 or self.quant.scale_margin <= 0:
+            problems.append("quant.scale_n must be >= 1 and quant.scale_margin > 0")
         if self.quant.mode not in ("ptq", "qat"):
             problems.append("quant.mode must be ptq or qat")
         if self.quant.mode == "qat" and self.quant.scheme == "none":
@@ -197,8 +205,15 @@ class RunConfig:
     # ---- serialisation ----
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
-        if raw["quant"]["scales"] == "dynamic":  # the default before static scales existed;
-            del raw["quant"]["scales"]  # leaving it out keeps earlier run IDs unchanged
+        quant = raw["quant"]
+        # Keys added after runs were trained are left out where they do not apply, so
+        # earlier run IDs stay unchanged.
+        if quant["scales"] in ("dynamic", "static"):
+            del quant["scale_n"], quant["scale_margin"]
+        elif quant["scales"] == "first_row":
+            del quant["scale_n"]
+        if quant["scales"] == "dynamic":  # the default before static scales existed
+            del quant["scales"]
         return raw
 
     def canonical_json(self) -> str:

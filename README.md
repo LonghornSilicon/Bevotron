@@ -119,6 +119,16 @@ and `--lut-res --lut-size` (exp table). Each eval appends a row to `results/int_
 with the largest value every matmul accumulator reached. Matmuls run exactly on CUDA int8
 tensor cores (`torch._int_mm`) or CPU int32, about 0.3 s per 512-token window on a laptop GPU.
 
+### Sampled scales (a mix of dynamic and static)
+
+`quant.scales: first_row | first_n | row_first_n` gives each quantized matrix (a Linear's
+input, or one head's keys or values) a scale taken from part of itself: the max of row 0,
+of the matrix's first `quant.scale_n` values, or of each row's own first N values. That
+max is multiplied by a headroom factor (`quant.scale_margin`), which QAT learns per Linear
+input and per KV head. On a chip only the sampled values wait at int16, and every other
+value goes straight to int4. `bevotron int` runs the same modes with integers only
+(`--scales --scale-n --scale-margin --mid-bits`; default: the run's own mode).
+
 ## Vocabulary (`configs/ablations/vocab_size.yaml`)
 
 Every run trains from scratch, so run this study on a data-center GPU with the 131K-batch

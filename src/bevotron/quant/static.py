@@ -20,7 +20,12 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-SCALE_SUFFIXES = ("act_log_scale", "k_log_scale", "v_log_scale")
+# Learned quantization parameters: static log scales, and the log headroom factors of
+# sampled scales (quant.hybrid). Split from the weights on load, own optimizer group.
+SCALE_SUFFIXES = (
+    "act_log_scale", "k_log_scale", "v_log_scale",
+    "act_log_margin", "k_log_margin", "v_log_margin",
+)  # fmt: skip
 CALIB_PERCENTILE = 0.9999  # clip the top 0.01% of values; the max wastes the grid on outliers
 CALIB_BATCHES = 8
 CALIB_WINDOWS = 16  # windows per calibration batch
@@ -59,7 +64,7 @@ class StaticKV(nn.Module):
 
 
 def split_scales(state: dict) -> tuple[dict, dict]:
-    """(plain model weights, learned static scales) from a checkpoint's state_dict."""
+    """(plain model weights, learned scales or margins) from a checkpoint's state_dict."""
     scales = {k: v for k, v in state.items() if k.endswith(SCALE_SUFFIXES)}
     return {k: v for k, v in state.items() if k not in scales}, scales
 

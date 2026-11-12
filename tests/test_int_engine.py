@@ -1,6 +1,7 @@
 """Integer-only engine: no floating-point op at inference, exact integer helpers, an exact
-KV cache, and logits that track the float model."""
+KV cache, and logits that track the float model, with static and with sampled scales."""
 
+import copy
 from pathlib import Path
 
 import pytest
@@ -13,7 +14,9 @@ from torch.utils._pytree import tree_flatten  # noqa: E402
 from bevotron.config import RunConfig, apply_overrides, load_raw  # noqa: E402
 from bevotron.models import Bevo  # noqa: E402
 from bevotron.quant import int_engine  # noqa: E402
+from bevotron.quant.hybrid import start_margins  # noqa: E402
 from bevotron.quant.int_export import IntSpec, build, collect, sampling_multiplier  # noqa: E402
+from bevotron.quant.ptq import apply_ptq  # noqa: E402
 
 BASELINE = Path(__file__).resolve().parents[1] / "configs" / "baseline.yaml"
 
@@ -111,3 +114,74 @@ def test_wide_integer_engine_tracks_the_float_model():
     assert corr > 0.98
     agree = (want.argmax(-1) == got.argmax(-1)).double().mean()
     assert agree > 0.8
+
+
+SAMPLED = (("first_row", 128), ("first_n", 16), ("row_first_n", 8))
+
+
+def test_quant_sampled_rounds_like_the_float_formula():
+    x = torch.tensor([[[100, -40, 7, 0], [250, -300, 13, -1]]])  # (B, T, C) holding values
+    mm = torch.tensor(5120)  # margin 1.25 over 2^12
+    for mode, n in (("first_row", 0), ("first_n", 2), ("row_first_n", 2)):
+        codes, a = int_engine.quant_sampled(x, mode, n, mm, 12, -8, 7)
+        seen = (
+            x[..., :1, :]
+            if mode == "first_row"
+            else x[..., :1, :n]
+            if mode == "first_n"
+            else x[..., :n]
+        )
+        amax = seen.abs().amax(-1, keepdim=True).double()
+        assert torch.equal(a, amax.long())
+        want = x.double() * 7 / (amax * 1.25)
+        want = (want.abs() + 0.5).floor() * want.sign()  # halves away from zero
+        assert torch.equal(codes, want.clamp(-8, 7).long())
+
+
+@pytest.mark.parametrize("mode,n", SAMPLED)
+def test_sampled_engine_uses_no_floating_point(mode, n):
+    P = export(tiny_model(), IntSpec(scales=mode, scale_n=n, scale_margin=1.25))
+    assert P["consts"]["mode"] == mode
+    leaves = tree_flatten({k: v for k, v in P.items() if k != "meta"})[0]
+    assert all(not torch.is_tensor(t) or not t.is_floating_point() for t in leaves)
+    x = batches(1)[0]
+    with NoFloat():
+        logits, caches = int_engine.forward(P, x)
+        greedy = int_engine.generate(P, x[:, :4], 6)
+    assert logits.dtype == torch.int64 and greedy.shape == (2, 10)
+    k, v, ak, av = caches[0]
+    assert ak.shape == av.shape == (*k.shape[:3], 1)  # one runtime factor per cached row
+
+
+def test_row_sampled_kv_cache_matches_full_forward_exactly():
+    # Per-row scales do not depend on other rows, so cached decoding is exact. (first_row
+    # and first_n give every new token its own one-row matrix, so they differ by design.)
+    P = export(tiny_model(), IntSpec(scales="row_first_n", scale_n=8))
+    x = batches(1)[0][:, :12]
+    full, _ = int_engine.forward(P, x)
+    logits, caches = int_engine.forward(P, x[:, :5])
+    steps = [logits]
+    for i in range(5, 12):
+        logits, caches = int_engine.forward(P, x[:, i : i + 1], caches)
+        steps.append(logits)
+    assert torch.equal(torch.cat(steps, dim=1), full)
+
+
+@pytest.mark.parametrize("mode,n", SAMPLED)
+def test_wide_sampled_engine_tracks_the_float_model(mode, n):
+    # Against the float model with the same sampled scales at 8 bits (fake quant).
+    model = tiny_model()
+    spec = IntSpec(
+        w_bits=8, a_bits=8, kv_bits=8, out_bits=12, p_bits=12, logit_bits=16,
+        scales=mode, scale_n=n, scale_margin=1.25,
+    )  # fmt: skip
+    P = export(model, spec)
+    sim = copy.deepcopy(model)
+    apply_ptq(sim, "int8", start_margins(sim, 1.25, 8, 8), (mode, n))
+    x = batches(1)[0]
+    with torch.no_grad():
+        want, _, _ = sim(x)
+    got, _ = int_engine.forward(P, x)
+    got = got.double() * P["meta"]["logit_scale"]
+    corr = torch.corrcoef(torch.stack([want.flatten().double(), got.flatten()]))[0, 1]
+    assert corr > 0.98

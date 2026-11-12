@@ -289,7 +289,7 @@ def cmd_tokenizer(args: argparse.Namespace) -> None:
 
 INT_SPEC_FLAGS = (
     "w_bits", "a_bits", "kv_bits", "out_bits", "acc_bits", "p_bits",
-    "res_bits", "logit_bits", "pos_bits", "lut_res", "lut_size",
+    "res_bits", "logit_bits", "pos_bits", "lut_res", "lut_size", "scale_n", "mid_bits",
 )  # fmt: skip
 
 
@@ -303,6 +303,7 @@ def cmd_int(args: argparse.Namespace) -> None:
 
     from bevotron.data.prepare import load_split, resolve_tokenizer_path
     from bevotron.quant import int_engine
+    from bevotron.quant.hybrid import MODES
     from bevotron.quant.int_export import (
         IntSpec,
         export_run,
@@ -315,12 +316,21 @@ def cmd_int(args: argparse.Namespace) -> None:
     folder = RUNS / args.run_id
     config = RunConfig.load(folder / "config.yaml")
     overrides = {f: getattr(args, f) for f in INT_SPEC_FLAGS if getattr(args, f) is not None}
-    spec = IntSpec.for_scheme(args.scheme or config.quant.scheme, **overrides)
+    run = config.quant  # sampled-scale runs default to their own mode, n and margin
+    sampled_run = run.scales in MODES
+    overrides["scales"] = args.scales or (run.scales if sampled_run else "static")
+    if sampled_run:
+        overrides.setdefault("scale_n", run.scale_n)
+        overrides.setdefault("scale_margin", run.scale_margin)
+    if args.scale_margin is not None:
+        overrides["scale_margin"] = args.scale_margin
+    spec = IntSpec.for_scheme(args.scheme or run.scheme, **overrides)
     device = pick_device(args.device)
     t0 = time.time()
     config, P = export_run(folder, spec, calibrate=args.calibrate, device=device)
-    scales = "learned" if P["meta"]["learned_scales"] else "calibrated"
-    print(f"integer model built ({scales} static scales) in {time.time() - t0:.0f}s", flush=True)
+    source = "learned" if P["meta"]["learned_scales"] else "calibrated"
+    what = "static scales" if spec.scales == "static" else f"{spec.scales} margins"
+    print(f"integer model built ({source} {what}) in {time.time() - t0:.0f}s", flush=True)
     if args.action == "export":
         out = Path(args.out or folder / "int_model.pt")
         torch.save(P, out)
@@ -332,7 +342,7 @@ def cmd_int(args: argparse.Namespace) -> None:
         row = {
             "run_id": args.run_id,
             **P["meta"]["spec"],
-            "scales": scales,
+            "scale_source": source,
             "windows": args.windows,
             "val_loss": r["val_loss"],
             "perplexity": math.exp(r["val_loss"]),
@@ -460,6 +470,18 @@ def main(argv: list[str] | None = None) -> None:
     for flag in INT_SPEC_FLAGS:
         p.add_argument(f"--{flag.replace('_', '-')}", dest=flag, type=int, default=None)
     p.add_argument("--calibrate", action="store_true", help="ignore the run's learned scales")
+    p.add_argument(
+        "--scales",
+        default=None,
+        choices=("static", "first_row", "first_n", "row_first_n"),
+        help="static, or sampled from part of each matrix (default: the run's)",
+    )
+    p.add_argument(
+        "--scale-margin",
+        type=float,
+        default=None,
+        help="headroom on the sampled max when the run has no learned margins",
+    )
     p.add_argument("--windows", type=int, default=128, help="eval: validation windows scored")
     p.add_argument("--prompt", default="Once upon a time")
     p.add_argument("-n", type=int, default=1)

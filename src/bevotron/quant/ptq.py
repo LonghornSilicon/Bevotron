@@ -6,10 +6,11 @@ That is enough to measure the accuracy cost; real integer kernels live in the
 inference engine.
 
   weights      symmetric, one scale per output channel, round-to-nearest
-  activations  symmetric, applied to every Linear input; one scale per token (dynamic)
-               or one fixed scale per Linear (static, quant.scales)
+  activations  symmetric, applied to every Linear input; one scale per token (dynamic),
+               one fixed scale per Linear (static, quant.scales), or one sampled from
+               part of the matrix (first_row, first_n, row_first_n; quant.hybrid)
   KV cache     symmetric, applied as K and V are produced; one scale per token per head
-               (dynamic) or one fixed scale per head (static)
+               (dynamic), one fixed scale per head (static), or sampled per head
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
+from bevotron.quant.hybrid import SampledKV, fake_quantize_sampled, sampling_of, start_margins
 from bevotron.quant.static import StaticKV, calibrate, calibration_batches, fake_quantize_static
 
 # scheme -> bits for (weights, activations, KV cache); None = leave in float
@@ -42,10 +44,13 @@ def fake_quantize(x: torch.Tensor, bits: int, dim: int = -1) -> torch.Tensor:
     return torch.clamp(torch.round(x / scale), -qmax - 1, qmax) * scale
 
 
-def apply_ptq(model: nn.Module, scheme: str, scales: dict | None = None) -> nn.Module:
+def apply_ptq(
+    model: nn.Module, scheme: str, scales: dict | None = None, sampling: tuple | None = None
+) -> nn.Module:
     """Quantize a trained model in place according to `scheme`. With `scales` (log scales
     from QAT or calibration, see quant.static) activations and the KV cache use those fixed
-    scales; without, every token gets its own."""
+    scales; without, every token gets its own. With `sampling` = (mode, n), `scales` holds
+    log margins and each matrix's scale is sampled from it (quant.hybrid)."""
     w_bits, a_bits, kv_bits = SCHEME_BITS[scheme]
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear) and module.weight.dim() == 2:
@@ -55,6 +60,11 @@ def apply_ptq(model: nn.Module, scheme: str, scales: dict | None = None) -> nn.M
             if a_bits is not None:
                 if scales is None:
                     module.register_forward_pre_hook(_activation_hook(a_bits))
+                elif sampling is not None:
+                    margin = scales[f"{name}.act_log_margin"].to(module.weight.device)
+                    module.register_forward_pre_hook(
+                        _sampled_activation_hook(a_bits, sampling, margin)
+                    )
                 else:
                     log_scale = scales[f"{name}.act_log_scale"].to(module.weight.device)
                     module.register_forward_pre_hook(_static_activation_hook(a_bits, log_scale))
@@ -64,6 +74,14 @@ def apply_ptq(model: nn.Module, scheme: str, scales: dict | None = None) -> nn.M
                     fake_quantize(k, b, dim=-1),  # per token, per head
                     fake_quantize(v, b, dim=-1),
                 )
+            elif sampling is not None:
+                device = next(module.parameters()).device
+                module.kv_quant = SampledKV(
+                    kv_bits,
+                    *sampling,
+                    scales[f"{name}.kv_quant.k_log_margin"].to(device),
+                    scales[f"{name}.kv_quant.v_log_margin"].to(device),
+                ).requires_grad_(False)
             else:
                 device = next(module.parameters()).device
                 module.kv_quant = StaticKV(
@@ -76,10 +94,16 @@ def apply_ptq(model: nn.Module, scheme: str, scales: dict | None = None) -> nn.M
 
 def quantize_for_eval(model: nn.Module, config, scales: dict, device: str) -> nn.Module:
     """Apply the run's scheme to a loaded model: learned static scales if the checkpoint
-    has them, calibrated ones for a static PTQ run, per-token scales otherwise."""
+    has them, calibrated ones for a static PTQ run, sampled scales with the learned (or
+    configured) margins for a sampled run, per-token scales otherwise."""
     scheme = config.quant.scheme
     if scheme == "none":
         return model
+    sampling = sampling_of(config.quant)
+    if sampling is not None:
+        _, a_bits, kv_bits = SCHEME_BITS[scheme]
+        margins = scales or start_margins(model, config.quant.scale_margin, a_bits, kv_bits)
+        return apply_ptq(model, scheme, margins, sampling)
     if config.quant.scales != "static":
         return apply_ptq(model, scheme)
     if not scales:
@@ -92,6 +116,14 @@ def _activation_hook(bits: int):
     def hook(_module, inputs):
         x = inputs[0]
         return (fake_quantize(x, bits, dim=-1),) + tuple(inputs[1:])
+
+    return hook
+
+
+def _sampled_activation_hook(bits: int, sampling: tuple, log_margin: torch.Tensor):
+    def hook(_module, inputs):
+        x = fake_quantize_sampled(inputs[0], bits, *sampling, log_margin)
+        return (x,) + tuple(inputs[1:])
 
     return hook
 
