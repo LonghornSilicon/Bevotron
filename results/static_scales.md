@@ -51,14 +51,6 @@ The integer engine matches the float simulation within 0.02, so going fully inte
 nothing extra. The last row shows that a model trained with per-token scales loses accuracy
 when switched to static scales afterwards. The scales need to be learned during QAT.
 
-## The three chip requirements
-
-| Requirement | Status |
-|---|---|
-| 1. INT8 matmul outputs, no FP accumulation | **Done.** Matmul outputs are int8 codes. An **int8 accumulator fails** (perplexity 223 for W4A4KV4). **int16 is enough for W4A4KV4:** with `--acc-bits 16` the result is identical (3.98, loss 1.3813), and the largest accumulator value is 9,280, under the 32,767 limit. |
-| 2. Static scaling, not dynamic | **Done.** Calibrated, then learned in QAT (above). |
-| 3. Integer-only requantization, no FP anywhere | **Done.** Every rescale is an integer multiply plus a rounding shift. LayerNorm uses integer mean, variance, square root and division. Softmax and GELU use lookup tables and integer division. Logits and sampling are integer. `tests/test_int_engine.py` fails if any floating-point operation runs. |
-
 Accumulator peaks for W4A4KV4 static QAT (`cd276db15a`):
 
 | Matmul | Largest value |
