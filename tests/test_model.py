@@ -35,6 +35,7 @@ def tiny(**overrides):
         {"model.n_kv_head": 1},
         {"model.preset": "llama"},
         {"model.attention_window": 8},
+        {"model.attention_window": 8, "model.global_layers": "first_last"},
         {"model.mlp_ratio": 2},
     ],
 )
@@ -136,3 +137,56 @@ def test_kv_cache_quantization_scales_per_token():
     model = apply_ptq(Bevo(tiny()), "w4a4kv4")
     kq, vq = model.blocks[0].attn.kv_quant(x, x)
     assert torch.equal(kq, q) and torch.equal(vq, q)
+
+
+@pytest.mark.parametrize(
+    "global_layers,windows",
+    [
+        ("none", [16, 16, 16, 16]),
+        ("first", [None, 16, 16, 16]),
+        ("last", [16, 16, 16, None]),
+        ("first_last", [None, 16, 16, None]),
+    ],
+)
+def test_global_layers_pick_which_layers_see_the_whole_context(global_layers, windows):
+    cfg = tiny(
+        **{"model.n_layer": 4, "model.attention_window": 16, "model.global_layers": global_layers}
+    )
+    assert [cfg.model.layer_window(i) for i in range(4)] == windows
+    assert [b.attn.window for b in Bevo(cfg).blocks] == windows
+    assert cfg.model.kv_tokens() == sum(32 if w is None else w for w in windows)
+
+
+def test_global_layers_config_rules_and_run_ids():
+    raw = load_raw(BASELINE)
+    assert "global_layers" not in RunConfig.from_dict(raw).to_dict()["model"]  # IDs kept
+    with pytest.raises(ValueError, match="needs an attention_window"):
+        RunConfig.from_dict(apply_overrides(raw, {"model.global_layers": "first"}))
+    with pytest.raises(ValueError, match="global_layers must be"):
+        RunConfig.from_dict(
+            apply_overrides(raw, {"model.attention_window": 16, "model.global_layers": "middle"})
+        )
+    ids = {
+        RunConfig.from_dict(
+            apply_overrides(raw, {"model.attention_window": 16, "model.global_layers": g})
+        ).run_id()
+        for g in ("none", "first", "last", "first_last")
+    }
+    assert len(ids) == 4
+
+
+@pytest.mark.parametrize(
+    "global_layers,reaches", [("none", False), ("first", True), ("last", True)]
+)
+def test_only_a_global_layer_lets_the_last_token_see_the_first(global_layers, reaches):
+    # 2 layers with window 4 see at most 2 * 3 tokens back; token 0 is 31 back.
+    cfg = tiny(**{"model.attention_window": 4, "model.global_layers": global_layers})
+    torch.manual_seed(0)
+    model = Bevo(cfg).eval()
+    x = torch.randint(0, cfg.tokenizer.vocab_size, (1, 32))
+    y = x.clone()
+    y[0, 0] = (x[0, 0] + 1) % cfg.tokenizer.vocab_size
+    with torch.no_grad():
+        a, _, _ = model(x)
+        b, _, _ = model(y)
+    assert torch.equal(a[0, -1], b[0, -1]) is not reaches

@@ -1,0 +1,17 @@
+name: local_attention
+question: How much attention context does bevo need, and at which depth?
+# Local layers attend to the last attention_window tokens only. global_layers keeps full
+# attention in the first, the last, or the first and last layer. Every variant at 4, 6 and 8
+# layers, plus full attention at each depth (8 is the baseline; 4 and 6 match layers.yaml).
+pairs:
+  - {}                                                                   # full attention
+  - {model.attention_window: 16}                                         # all local
+  - {model.attention_window: 16, model.global_layers: first}
+  - {model.attention_window: 16, model.global_layers: last}
+  - {model.attention_window: 16, model.global_layers: first_last}
+  - {model.attention_window: 32}
+  - {model.attention_window: 32, model.global_layers: first}
+  - {model.attention_window: 32, model.global_layers: last}
+  - {model.attention_window: 32, model.global_layers: first_last}
+grid:
+  model.n_layer: [4, 6, 8]

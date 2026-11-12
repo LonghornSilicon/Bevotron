@@ -38,7 +38,8 @@ def memory(config: RunConfig) -> MemoryReport:
 
     Weights count non-embedding parameters only (the token table stays on the
     CPU). KV cache = 2 (K and V) x layers x kv heads x head dim x cached tokens,
-    where cached tokens is the context length, or the local window if smaller.
+    where cached tokens is the context length, or the local window if smaller, per layer
+    (global layers keep the whole context).
 
     embedding_bytes is the embeddings at the precision the evaluated model stores them,
     kept separate because they are the only part that changes with vocabulary size. The
@@ -50,8 +51,7 @@ def memory(config: RunConfig) -> MemoryReport:
     """
     m = config.model
     w_bytes, _, kv_bytes = QUANT_BYTES[config.quant.scheme]
-    cached = m.context_len if m.attention_window is None else min(m.attention_window, m.context_len)
-    kv = 2 * m.n_layer * m.n_kv_head * m.head_dim * cached
+    kv = 2 * m.n_kv_head * m.head_dim * m.kv_tokens()
     table = config.tokenizer.vocab_size * m.d_model
     positions = m.context_len * m.d_model if m.pos_encoding == "learned" else 0
     unrounded = positions + (0 if m.tie_embeddings else table)

@@ -57,11 +57,32 @@ class ModelConfig:
     pos_encoding: str | None = None  # learned | rope
     mlp_act: str | None = None  # gelu | swiglu
     attention_window: int | None = None  # local-attention window, None = full
+    # With a window: which layers keep full (global) attention. none | first | last |
+    # first_last (the first and the last layer). The others attend to the window only.
+    global_layers: str = "none"
     tie_embeddings: bool = True
 
     @property
     def head_dim(self) -> int:
         return self.d_model // self.n_head
+
+    def layer_window(self, i: int) -> int | None:
+        """Layer i's attention window, None for full attention."""
+        last = self.n_layer - 1
+        is_global = {
+            "none": False,
+            "first": i == 0,
+            "last": i == last,
+            "first_last": i in (0, last),
+        }[self.global_layers]
+        return None if is_global else self.attention_window
+
+    def kv_tokens(self) -> int:
+        """Cached tokens summed over layers: a local layer keeps only its window."""
+        return sum(
+            self.context_len if w is None else min(w, self.context_len)
+            for w in map(self.layer_window, range(self.n_layer))
+        )
 
 
 @dataclass
@@ -165,6 +186,10 @@ class RunConfig:
             problems.append(f"mlp_act must be gelu or swiglu, got {m.mlp_act!r}")
         if m.attention_window is not None and m.attention_window > m.context_len:
             problems.append("attention_window larger than context_len")
+        if m.global_layers not in ("none", "first", "last", "first_last"):
+            problems.append("global_layers must be none, first, last or first_last")
+        elif m.global_layers != "none" and m.attention_window is None:
+            problems.append("global_layers needs an attention_window for the other layers")
         if self.tokenizer.vocab_size < 257:
             problems.append("vocab_size must hold 256 bytes plus <|endoftext|>")
         if self.quant.scheme not in QUANT_BYTES:
@@ -206,6 +231,8 @@ class RunConfig:
     # ---- serialisation ----
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
+        if raw["model"]["global_layers"] == "none":
+            del raw["model"]["global_layers"]
         quant = raw["quant"]
         # Keys added after runs were trained are left out where they do not apply, so
         # earlier run IDs stay unchanged.

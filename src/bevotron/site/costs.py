@@ -17,11 +17,10 @@ def hardware_cost(config: RunConfig) -> dict:
     m = config.model
     w_bytes, a_bytes, kv_bytes = QUANT_BYTES[config.quant.scheme]
     mem = memory(config)
-    cached = m.context_len if m.attention_window is None else min(m.attention_window, m.context_len)
     output_table = config.tokenizer.vocab_size * m.d_model
     host_bytes = mem.total_bytes
     chip_bytes = host_bytes + output_table * w_bytes
-    attention_macs = 2 * m.n_layer * m.d_model * cached  # q.k and attn.v over the context
+    attention_macs = 2 * m.d_model * m.kv_tokens()  # q.k and attn.v over each layer's context
     return {
         "weight_bits": int(w_bytes * 8),
         "act_bits": int(a_bytes * 8),

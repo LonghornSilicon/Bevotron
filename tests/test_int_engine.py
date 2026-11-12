@@ -184,3 +184,18 @@ def test_wide_sampled_engine_tracks_the_float_model(mode, n):
     got = got.double() * P["meta"]["logit_scale"]
     corr = torch.corrcoef(torch.stack([want.flatten().double(), got.flatten()]))[0, 1]
     assert corr > 0.98
+
+
+def test_kv_cache_is_exact_with_local_and_global_layers():
+    P = export(
+        tiny_model(**{"model.attention_window": 4, "model.global_layers": "first"}), IntSpec()
+    )
+    assert P["meta"]["layer_windows"] == [None, 4]
+    x = batches(1)[0][:, :12]
+    full, _ = int_engine.forward(P, x)
+    logits, caches = int_engine.forward(P, x[:, :5])
+    steps = [logits]
+    for i in range(5, 12):
+        logits, caches = int_engine.forward(P, x[:, i : i + 1], caches)
+        steps.append(logits)
+    assert torch.equal(torch.cat(steps, dim=1), full)

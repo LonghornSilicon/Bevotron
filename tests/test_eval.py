@@ -24,6 +24,9 @@ def test_memory_responds_to_knobs():
     assert w4.weight_bytes == 25_165_824 // 2 and w4.kv_cache_bytes == 2 * 8 * 16 * 32 * 512 // 2
     local = memory(RunConfig.from_dict(apply_overrides(base, {"model.attention_window": 256})))
     assert local.kv_cache_bytes == 2 * 8 * 16 * 32 * 256
+    both = {"model.attention_window": 32, "model.global_layers": "first_last"}
+    mixed = memory(RunConfig.from_dict(apply_overrides(base, both)))
+    assert mixed.kv_cache_bytes == 2 * 16 * 32 * (2 * 512 + 6 * 32)  # 2 global, 6 local
 
 
 def test_embedding_memory_is_separate_and_scales_with_vocab():

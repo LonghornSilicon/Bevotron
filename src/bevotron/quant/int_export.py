@@ -308,6 +308,7 @@ def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = N
             "head_dim": hd,
             "context_len": cfg.context_len,
             "attention_window": cfg.attention_window,
+            "layer_windows": [cfg.layer_window(i) for i in range(cfg.n_layer)],
             "spec": asdict(spec),
             # floats below are read only by the scoring and sampling helpers, never the engine
             "logit_scale": s_logit,

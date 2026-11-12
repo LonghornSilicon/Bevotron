@@ -161,13 +161,13 @@ def causal_mask(t: int, tk: int, window: int | None, device) -> torch.Tensor:
     return allowed
 
 
-def attention(q, k, v, ak, av, L: dict, P: dict, stats: dict | None):
+def attention(q, k, v, ak, av, L: dict, P: dict, stats: dict | None, window: int | None):
     """q (B,H,T,hd) out_bits; k, v (B,H,Tk,hd) kv_bits; ak, av (B,H,Tk,1) the runtime
     factors of sampled K and V scales, or None. Returns (B,T,d) written for o's input
     (its codes, or int16 holding values when sampled)."""
     c = P["consts"]
     t, tk = q.shape[2], k.shape[2]
-    mask = causal_mask(t, tk, P["meta"]["attention_window"], q.device)[None, None]
+    mask = causal_mask(t, tk, window, q.device)[None, None]
     scores = imatmul(q, k.transpose(-1, -2), c["acc_bits"], stats, "scores")
     if ak is not None:  # each key column at its own scale: bring them to one
         scores = scores * ak.transpose(-1, -2)
@@ -234,7 +234,8 @@ def forward(P: dict, idx: torch.Tensor, caches=None, stats: dict | None = None):
             k, v = k.repeat_interleave(rep, dim=1), v.repeat_interleave(rep, dim=1)
             if mode is not None:
                 ak, av = ak.repeat_interleave(rep, dim=1), av.repeat_interleave(rep, dim=1)
-        x_o, a_o = act_in(attention(q, k, v, ak, av, L, P, stats), L["o"], c)
+        window = meta["layer_windows"][i]
+        x_o, a_o = act_in(attention(q, k, v, ak, av, L, P, stats, window), L["o"], c)
         o = linear(x_o, L["o"], acc, stats, "o", a_o)
         r = (r + requant(o, *L["res_attn"], r_lo, r_hi)).clamp(r_lo, r_hi)
 

@@ -41,6 +41,8 @@ class Bevo(nn.Module):
         )
         rope = RotaryEmbedding(m.head_dim, m.context_len) if m.pos_encoding == "rope" else None
         self.blocks = nn.ModuleList(Block(config, rope) for _ in range(m.n_layer))
+        for i, block in enumerate(self.blocks):  # local or global, per layer
+            block.attn.window = m.layer_window(i)
         self.norm_f = make_norm(m.norm, m.d_model)
         self.lm_head = nn.Linear(m.d_model, vocab, bias=False)
         if m.tie_embeddings:
