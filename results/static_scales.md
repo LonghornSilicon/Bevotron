@@ -2,7 +2,7 @@
 
 **Bottom line:** W4A4KV4 with static scales, trained with QAT and run fully integer with
 int16 accumulators, reaches 3.98 perplexity against 3.00 at full precision, and its stories
-stay coherent. W4A8KV4 static QAT is almost lossless (3.10).
+stay coherent. 
 
 ## Setup
 
@@ -51,21 +51,7 @@ The integer engine matches the float simulation within 0.02, so going fully inte
 nothing extra. The last row shows that a model trained with per-token scales loses accuracy
 when switched to static scales afterwards. The scales need to be learned during QAT.
 
-Accumulator peaks for W4A4KV4 static QAT (`cd276db15a`):
-
-| Matmul | Largest value |
-|---|---|
-| Attention scores | 9,280 |
-| Probabilities x V | 2,056 |
-| k | 1,347 |
-| Output layer | 1,168 |
-| q | 1,123 |
-| v | 1,080 |
-| down | 1,075 |
-| o | 976 |
-| up | 536 |
-
-## Follow-up: mixed dynamic+static scales
+## Mixed dynamic+static scales
 
 Each matrix takes its scale from part of itself, times a headroom factor learned in QAT
 (`quant/hybrid.py`, branch `feature/hybrid-scales`). All rows are W4A4KV4 QAT, run fully
@@ -86,10 +72,7 @@ integer with int16 accumulators on the first 128 validation windows.
 | `38099ca695` | Each row's first 64 values | 3.47 | 1.533 | 24,546 |
 | `9e0f9f50a4` | Each row's first 128 values | 3.44 | 1.520 | 28,168 |
 
-For comparison, per-token dynamic scales (`a5ad4528c4`) give 3.52 in float simulation and a
-full-split loss of 1.549. Every mixed variant beats static. The cost is an int16 holding area
-for the sampled values and one integer divide per value. The 16x16 tile is the best option
-that keeps one scale per matrix.
+The 16x16 tile is the best option that keeps one scale per matrix.
 
 ## Reproduce
 
@@ -97,11 +80,3 @@ that keeps one scale per matrix.
     uv run bevotron run runs/<id>/config.yaml                      # train and score
     uv run bevotron int eval <id> --windows 128 --acc-bits 16      # fully integer
     uv run bevotron int generate <id> --prompt "Once upon a time"
-
-## Caveats
-
-- One model size, one seed, one dataset.
-- The 128-window numbers compare methods with each other. The full-split numbers are the
-  ones to quote.
-- Story quality has no judge scores yet (the LLM judge needs `ANTHROPIC_API_KEY`).
-- Checkpoints live on one laptop, not in the repo.
