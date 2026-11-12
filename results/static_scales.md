@@ -54,25 +54,32 @@ when switched to static scales afterwards. The scales need to be learned during 
 ## Mixed dynamic+static scales
 
 Each matrix takes its scale from part of itself, times a headroom factor learned in QAT
-(`quant/hybrid.py`, branch `feature/hybrid-scales`). All rows are W4A4KV4 QAT, run fully
-integer with int16 accumulators on the first 128 validation windows.
+(`quant/hybrid.py`, branch `feature/hybrid-scales`). All rows are W4A4KV4 QAT, on the first
+128 validation windows.
 
-| Run | Scale from | Integer perplexity | Full-split val loss | Largest accumulator |
-|---|---|---|---|---|
-| `cd276db15a` | Static (above) | 3.98 | 1.667 | 9,280 |
-| `2d7a069f56` | First row | 3.68 | 1.606 | 17,003 |
-| `ee2f2ec9f2` | First 8 values of the matrix | 3.71 | 1.591 | 13,599 |
-| `9a05eb501f` | First 16 values of the matrix | 3.72 | 1.591 | 15,606 |
-| `a717e92627` | First 64 values of the matrix | 3.73 | 1.601 | 19,183 |
-| `65d98719b6` | First 128 values of the matrix | 3.63 | 1.573 | 17,480 |
-| `64917039df` | First 8x8 tile | 3.62 | 1.567 | 15,729 |
-| `b918baa448` | First 16x16 tile | 3.48 | 1.531 | 19,792 |
-| `d33add49d3` | Each row's first 8 values | 3.76 | 1.595 | 18,971 |
-| `634e1145be` | Each row's first 16 values | 3.66 | 1.580 | 17,344 |
-| `38099ca695` | Each row's first 64 values | 3.47 | 1.533 | 24,546 |
-| `9e0f9f50a4` | Each row's first 128 values | 3.44 | 1.520 | 28,168 |
+Whole-matrix modes (first row, first N values of the matrix, first tile) set one scale for
+every row of a matrix. Scoring runs whole 512-token sequences, but text generation runs one
+token at a time, so each new token takes its scale from its own row. The generation column
+scores each model quantized that way. Per-row modes are the same both ways.
 
-The 16x16 tile is the best option that keeps one scale per matrix.
+| Run | Scale from | Integer, whole sequence | **Float, generation** | Full-split val loss | Largest accumulator |
+|---|---|---|---|---|---|
+| `cd276db15a` | Static (above) | 3.98 | **3.97** | 1.667 | 9,280 |
+| `2d7a069f56` | First row | 3.68 | **3.61** | 1.606 | 17,003 |
+| `ee2f2ec9f2` | First 8 values of the matrix | 3.71 | **4.30** | 1.591 | 13,599 |
+| `9a05eb501f` | First 16 values of the matrix | 3.72 | **4.27** | 1.591 | 15,606 |
+| `a717e92627` | First 64 values of the matrix | 3.73 | **4.43** | 1.601 | 19,183 |
+| `65d98719b6` | First 128 values of the matrix | 3.63 | **3.89** | 1.573 | 17,480 |
+| `64917039df` | First 8x8 tile | 3.62 | **5.51** | 1.567 | 15,729 |
+| `b918baa448` | First 16x16 tile | 3.48 | **5.13** | 1.531 | 19,792 |
+| `d33add49d3` | Each row's first 8 values | 3.76 | **3.72** | 1.595 | 18,971 |
+| `634e1145be` | Each row's first 16 values | 3.66 | **3.63** | 1.580 | 17,344 |
+| `38099ca695` | Each row's first 64 values | 3.47 | **3.47** | 1.533 | 24,546 |
+| `9e0f9f50a4` | Each row's first 128 values | 3.44 | **3.44** | 1.520 | 28,168 |
+
+Integer runs use int16 accumulators. For generating text, each row's first 128 values is the
+best option (3.44, ahead of per-token dynamic at 3.52). Tiles and first-N-of-the-matrix lose
+to static during generation, although they look better on whole sequences.
 
 ## Reproduce
 
