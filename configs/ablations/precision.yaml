@@ -16,8 +16,8 @@ pairs:
   - {quant.scheme: w4a8kv4, quant.mode: qat, quant.scales: static}
   # Sampled scales (quant.hybrid): each matrix's scale from part of itself, times a learned
   # headroom. first_row: row 0's max for the whole matrix. first_n: the first N values of
-  # the matrix. row_first_n: each row's own first N. Starting margins are the best of a
-  # float sweep on the per-token QAT run without retraining.
+  # the matrix. row_first_n: each row's own first N. first_tile: the top-left N x N tile.
+  # Starting margins are the best of a float sweep on the per-token QAT run (no retraining).
   - {quant.scheme: w4a4kv4, quant.mode: qat, quant.scales: first_row, quant.scale_margin: 1.0}
   - {quant.scheme: w4a4kv4, quant.mode: qat, quant.scales: first_n, quant.scale_n: 8, quant.scale_margin: 2.0}
   - {quant.scheme: w4a4kv4, quant.mode: qat, quant.scales: first_n, quant.scale_n: 16, quant.scale_margin: 2.0}
@@ -27,3 +27,5 @@ pairs:
   - {quant.scheme: w4a4kv4, quant.mode: qat, quant.scales: row_first_n, quant.scale_n: 16, quant.scale_margin: 2.0}
   - {quant.scheme: w4a4kv4, quant.mode: qat, quant.scales: row_first_n, quant.scale_n: 64, quant.scale_margin: 1.5}
   - {quant.scheme: w4a4kv4, quant.mode: qat, quant.scales: row_first_n, quant.scale_n: 128, quant.scale_margin: 1.25}
+  - {quant.scheme: w4a4kv4, quant.mode: qat, quant.scales: first_tile, quant.scale_n: 8, quant.scale_margin: 2.0}
+  - {quant.scheme: w4a4kv4, quant.mode: qat, quant.scales: first_tile, quant.scale_n: 16, quant.scale_margin: 1.5}

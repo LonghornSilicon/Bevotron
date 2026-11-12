@@ -116,23 +116,22 @@ def test_wide_integer_engine_tracks_the_float_model():
     assert agree > 0.8
 
 
-SAMPLED = (("first_row", 128), ("first_n", 16), ("row_first_n", 8))
+SAMPLED = (("first_row", 128), ("first_n", 16), ("row_first_n", 8), ("first_tile", 8))
 
 
 def test_quant_sampled_rounds_like_the_float_formula():
     x = torch.tensor([[[100, -40, 7, 0], [250, -300, 13, -1]]])  # (B, T, C) holding values
     mm = torch.tensor(5120)  # margin 1.25 over 2^12
-    for mode, n in (("first_row", 0), ("first_n", 2), ("row_first_n", 2)):
+    cases = (  # mode, n, the sampled max it must find
+        ("first_row", 0, [[[100]]]),
+        ("first_n", 2, [[[100]]]),
+        ("row_first_n", 2, [[[100], [300]]]),
+        ("first_tile", 2, [[[300]]]),  # rows 0-1, values 0-1: 100, -40, 250, -300
+    )
+    for mode, n, top in cases:
         codes, a = int_engine.quant_sampled(x, mode, n, mm, 12, -8, 7)
-        seen = (
-            x[..., :1, :]
-            if mode == "first_row"
-            else x[..., :1, :n]
-            if mode == "first_n"
-            else x[..., :n]
-        )
-        amax = seen.abs().amax(-1, keepdim=True).double()
-        assert torch.equal(a, amax.long())
+        assert a.tolist() == top
+        amax = a.double()
         want = x.double() * 7 / (amax * 1.25)
         want = (want.abs() + 0.5).floor() * want.sign()  # halves away from zero
         assert torch.equal(codes, want.clamp(-8, 7).long())

@@ -32,7 +32,7 @@ QUANT_BYTES: dict[str, tuple[float, float, float]] = {
 }
 
 
-SCALE_MODES = ("dynamic", "static", "first_row", "first_n", "row_first_n")
+SCALE_MODES = ("dynamic", "static", "first_row", "first_n", "row_first_n", "first_tile")
 
 
 def parse_count(value: int | str) -> int:
@@ -105,9 +105,10 @@ class QuantConfig:
     mode: str = "ptq"  # ptq: quantize the trained checkpoint; qat: fine-tune with fake quant (STE)
     # dynamic: a fresh scale per token for activations and the KV cache. static: one fixed
     # scale per Linear input and per KV head (calibrated for PTQ, learned in QAT).
-    # first_row | first_n | row_first_n: sampled from part of each matrix (quant.hybrid).
+    # first_row | first_n | row_first_n | first_tile: sampled from part of each matrix
+    # (quant.hybrid).
     scales: str = "dynamic"
-    scale_n: int = 128  # values sampled by first_n and row_first_n
+    scale_n: int = 128  # values sampled by first_n and row_first_n, tile side for first_tile
     scale_margin: float = 1.0  # headroom on the sampled max (QAT starts here and learns it)
     # QAT starts from the trained full-precision checkpoint (PTQ comes first), then fine-tunes:
     qat_tokens: int | str = "50M"

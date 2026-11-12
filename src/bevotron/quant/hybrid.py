@@ -8,10 +8,13 @@ one head's keys or values (B, H, T, head_dim). Modes (quant.scales):
   first_n       the max of the matrix's first N values (row 0's first N, quant.scale_n)
                 sets the scale for every row
   row_first_n   each row's scale comes from that row's own first N values
+  first_tile    the max of the top-left N x N tile (rows 0..N-1, values 0..N-1) sets
+                the scale for every row
 
 On a chip, first_row keeps one row at int16 to find its max, quantizes it, then writes
 every later row straight to int4 with that scale. first_n keeps only N values. row_first_n
-keeps N values of every row. The scale is one integer per matrix (or per row), so the
+keeps N values of every row. first_tile keeps N x N values, and rows N and later go
+straight to int4. The scale is one integer per matrix (or per row), so the
 consumer's requantization is the static (multiplier, shift) times that integer
 (quant.int_engine).
 
@@ -26,7 +29,8 @@ static scales, and stored as a natural log:
 
 Each call samples its own matrix. In training and evaluation a call is a whole sequence,
 so first_row means token 0. In cached generation every new token is a one-row matrix and
-gets its own scale; cached keys and values keep the scale they were written with.
+gets its own scale (for first_tile, from its first N values); cached keys and values keep
+the scale they were written with.
 """
 
 from __future__ import annotations
@@ -38,7 +42,7 @@ import torch.nn as nn
 
 from bevotron.quant.static import fake_quantize_static, qmax
 
-MODES = ("first_row", "first_n", "row_first_n")
+MODES = ("first_row", "first_n", "row_first_n", "first_tile")
 
 
 def sample(x: torch.Tensor, mode: str, n: int) -> torch.Tensor:
@@ -49,16 +53,25 @@ def sample(x: torch.Tensor, mode: str, n: int) -> torch.Tensor:
         return x[..., :1, :n]
     if mode == "row_first_n":
         return x[..., :n]
+    if mode == "first_tile":
+        return x[..., :n, :n]
     raise ValueError(f"unknown sampled-scale mode {mode!r}; choose {MODES}")
+
+
+def sample_max(x: torch.Tensor, mode: str, n: int) -> torch.Tensor:
+    """max |value| of the sample, shaped to broadcast over x: (..., T, 1) for row_first_n,
+    (..., 1, 1) for the modes that set one scale per matrix. Works on integers too."""
+    m = sample(x, mode, n).abs().amax(dim=-1, keepdim=True)
+    return m if mode == "row_first_n" else m.amax(dim=-2, keepdim=True)
 
 
 def fake_quantize_sampled(
     x: torch.Tensor, bits: int, mode: str, n: int, log_margin: torch.Tensor
 ) -> torch.Tensor:
     """Scale = max|sample| * exp(log_margin) / qmax, broadcast over the matrix (first_row,
-    first_n) or kept per row (row_first_n). Straight-through for x, LSQ for the margin;
-    the sampled max itself is not differentiated (as with dynamic scales)."""
-    amax = sample(x, mode, n).detach().abs().amax(dim=-1, keepdim=True).clamp(min=1e-8)
+    first_n, first_tile) or kept per row (row_first_n). Straight-through for x, LSQ for the
+    margin; the sampled max itself is not differentiated (as with dynamic scales)."""
+    amax = sample_max(x.detach(), mode, n).clamp(min=1e-8)
     return fake_quantize_static(x, bits, (amax / qmax(bits)).log() + log_margin)
 
 

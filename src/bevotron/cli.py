@@ -473,7 +473,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument(
         "--scales",
         default=None,
-        choices=("static", "first_row", "first_n", "row_first_n"),
+        choices=("static", "first_row", "first_n", "row_first_n", "first_tile"),
         help="static, or sampled from part of each matrix (default: the run's)",
     )
     p.add_argument(

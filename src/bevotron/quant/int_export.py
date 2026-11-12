@@ -5,7 +5,8 @@ calibration text (or takes the scales a static-QAT run learned), rounds the weig
 folds every ratio of scales into an integer (multiplier, shift) pair, so that the engine
 needs nothing but integer multiplies, shifts, divisions and table lookups.
 
-With sampled scales (IntSpec.scales first_row, first_n or row_first_n, see quant.hybrid)
+With sampled scales (IntSpec.scales first_row, first_n, row_first_n or first_tile, see
+quant.hybrid)
 each Linear input and each KV head is first written at mid_bits (int16) with a fixed
 scale, the max of a sample of that matrix becomes a runtime integer `a`, and the codes are
 round(x * qmax / (a * margin)) by integer division. The real scale of a code is then a
@@ -37,6 +38,9 @@ LN_GAMMA_BITS = 16
 EXP_BITS = 16  # exp table entries are round(exp(-i / lut_res) * 2^16)
 MARGIN_BITS = 12  # sampled-scale headroom as an integer over 2^12
 SAMPLED_M_BITS = 15  # multipliers that also take a runtime factor: acc * a * m fits int64
+# Sampled V rows: probability times the row's factor, shifted down to this many bits, so
+# the attention-value sum stays within an int16 accumulator.
+PV_FOLD_BITS = 12
 
 
 @dataclass(frozen=True)
@@ -54,9 +58,9 @@ class IntSpec:
     pos_bits: int = 8  # learned position table
     lut_res: int = 32  # exp table steps per unit of score gap
     lut_size: int = 512  # exp table length; gaps past lut_size / lut_res count as 0
-    # static: fixed scales. first_row | first_n | row_first_n: sampled (quant.hybrid)
+    # static: fixed scales. first_row | first_n | row_first_n | first_tile: sampled
     scales: str = "static"
-    scale_n: int = 128  # values sampled by first_n and row_first_n
+    scale_n: int = 128  # values sampled by first_n and row_first_n, tile side for first_tile
     scale_margin: float = 1.0  # headroom when the run has no learned margins
     mid_bits: int = 16  # holding width before a sampled quantization
 
@@ -163,6 +167,7 @@ def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = N
     mid_lo, mid_hi = _range(spec.mid_bits)
     in_lo, in_hi = (mid_lo, mid_hi) if sampled else (a_lo, a_hi)  # what feeds a Linear
     m_bits = SAMPLED_M_BITS if sampled else 31
+    pv_shift = max(1, spec.p_bits + spec.mid_bits - 1 - PV_FOLD_BITS)
 
     def margin(key: str) -> torch.Tensor:
         """Learned (or configured) headroom as an integer over 2^MARGIN_BITS."""
@@ -246,6 +251,8 @@ def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = N
 
         score = s_q * s_k_heads / math.sqrt(hd) * spec.lut_res  # score gap -> exp index
         pv = 2.0**-spec.p_bits * s_v_heads / dest["o"]
+        if sampled:  # the engine shifts p * a_v down by pv_shift bits before the matmul
+            pv = pv * 2.0**pv_shift
         gelu_in = torch.arange(out_lo, out_hi + 1, dtype=torch.float64) * s_up
         gelu = torch.nn.functional.gelu(gelu_in, approximate="tanh")
         layers.append(
@@ -320,6 +327,7 @@ def build(model: nn.Module, spec: IntSpec, stats: dict, learned: dict | None = N
             "mode": spec.scales if sampled else None,
             "scale_n": spec.scale_n,
             "margin_bits": MARGIN_BITS,
+            "pv_shift": pv_shift,
             "res_lo": res_lo,
             "res_hi": res_hi,
             "ln_frac_bits": LN_FRAC_BITS,

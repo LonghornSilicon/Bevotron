@@ -11,7 +11,8 @@ inference time:
   GELU        lookup table from the up projection's output code to down's input code
   logits      integers; greedy decoding is an integer argmax, sampling uses the exp table
               and an integer random draw
-  sampled     (first_row, first_n, row_first_n; quant.hybrid) a Linear input or KV head is
+  sampled     (first_row, first_n, row_first_n, first_tile; quant.hybrid) a Linear input
+              or KV head is
   scales      written at mid_bits with a fixed scale, the max of a sample of the matrix
               is a runtime integer a, codes are round(x * qmax / (a * margin)) by integer
               division, and the consumer multiplies its accumulator by a before its
@@ -34,6 +35,8 @@ width. Values are held in int64 tensors; their ranges are set by the IntSpec bit
 from __future__ import annotations
 
 import torch
+
+from bevotron.quant.hybrid import sample_max
 
 INT32 = torch.int32
 
@@ -104,16 +107,10 @@ def linear(x: torch.Tensor, p: dict, acc_bits: int, stats: dict | None, key: str
 
 def quant_sampled(x: torch.Tensor, mode: str, n: int, mm, mbits: int, lo: int, hi: int):
     """x (..., T, C) int16 holding values -> (codes, a). a is the max |value| of the
-    sample (row 0, row 0's first n values, or each row's first n), kept (..., 1, 1) or
-    (..., T, 1). codes = round(x * hi / (a * mm / 2^mbits)), clamped: one integer division
-    per value, no float."""
-    if mode == "first_row":
-        seen = x[..., :1, :]
-    elif mode == "first_n":
-        seen = x[..., :1, :n]
-    else:  # row_first_n
-        seen = x[..., :n]
-    a = seen.abs().amax(-1, keepdim=True).clamp(min=1)
+    sample (row 0, row 0's first n values, the top-left n x n tile, or each row's first n),
+    kept (..., 1, 1) or (..., T, 1). codes = round(x * hi / (a * mm / 2^mbits)), clamped:
+    one integer division per value, no float."""
+    a = sample_max(x, mode, n).clamp(min=1)
     den = a * mm
     num = torch.bitwise_left_shift(x.abs() * hi, mbits + 1) + den
     q = torch.div(num, 2 * den, rounding_mode="floor")  # nearest, halves away from zero
@@ -182,7 +179,8 @@ def attention(q, k, v, ak, av, L: dict, P: dict, stats: dict | None):
     p = torch.div(torch.bitwise_left_shift(e, p_bits) + total // 2, total, rounding_mode="floor")
     p = p.clamp(0, (1 << p_bits) - 1)
     if av is not None:  # fold each value row's factor into its probability
-        p = p * av.transpose(-1, -2)
+        p = p * av.transpose(-1, -2)  # up to p_bits + mid_bits - 1 bits
+        p = requant(p, 1, c["pv_shift"], 0, torch.iinfo(torch.int64).max)  # to PV_FOLD_BITS
     pv = imatmul(p, v, c["acc_bits"], stats, "pv")  # (B,H,T,hd)
     y = requant(pv, L["pv_m"], L["pv_s"], c["in_lo"], c["in_hi"])
     b, h, _, hd = y.shape

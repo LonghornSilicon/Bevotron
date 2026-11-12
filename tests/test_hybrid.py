@@ -12,6 +12,7 @@ from bevotron.models import Bevo  # noqa: E402
 from bevotron.quant.hybrid import (  # noqa: E402
     fake_quantize_sampled,
     sample,
+    sample_max,
     sampling_of,
     start_margins,
 )
@@ -68,6 +69,11 @@ def test_samples_are_the_parts_named():
     assert torch.equal(sample(x, "first_row", 0), x[:, :, :1, :])
     assert torch.equal(sample(x, "first_n", 2), x[:, :, :1, :2])
     assert torch.equal(sample(x, "row_first_n", 2), x[:, :, :, :2])
+    assert torch.equal(sample(x, "first_tile", 2), x[:, :, :2, :2])
+    tile_max = sample_max(x, "first_tile", 2)
+    assert tile_max.shape == (2, 3, 1, 1)  # one scale per matrix
+    assert torch.equal(tile_max, x[:, :, 1:2, 1:2])  # the tile's bottom-right is its max
+    assert sample_max(x, "row_first_n", 2).shape == (2, 3, 4, 1)  # one per row
 
 
 def test_whole_row_sample_is_the_dynamic_per_token_scale():
@@ -95,7 +101,7 @@ def test_sampled_qat_learns_margins_and_ptq_reproduces_it():
     margins = start_margins(model, 1.25, a_bits, kv_bits)
     assert margins["blocks.0.attn.kv_quant.k_log_margin"].shape == (1, cfg.model.n_kv_head, 1, 1)
     plain_keys = set(Bevo(cfg).state_dict())
-    for sampling in (("first_row", 128), ("first_n", 16), ("row_first_n", 8)):
+    for sampling in (("first_row", 128), ("first_n", 16), ("row_first_n", 8), ("first_tile", 8)):
         model = Bevo(cfg)
         apply_qat(model, "w4a4kv4", margins, sampling)
         x = torch.randint(
