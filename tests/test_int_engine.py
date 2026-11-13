@@ -148,19 +148,20 @@ def test_sampled_engine_uses_no_floating_point(mode, n):
         logits, caches = int_engine.forward(P, x)
         greedy = int_engine.generate(P, x[:, :4], 6)
     assert logits.dtype == torch.int64 and greedy.shape == (2, 10)
-    k, v, ak, av = caches[0]
+    k, v, ak, av, _ = caches[0]
     assert ak.shape == av.shape == (*k.shape[:3], 1)  # one runtime factor per cached row
 
 
-def test_row_sampled_kv_cache_matches_full_forward_exactly():
-    # Per-row scales do not depend on other rows, so cached decoding is exact. (first_row
-    # and first_n give every new token its own one-row matrix, so they differ by design.)
-    P = export(tiny_model(), IntSpec(scales="row_first_n", scale_n=8))
-    x = batches(1)[0][:, :12]
+@pytest.mark.parametrize("mode,n", SAMPLED)
+def test_sampled_kv_cache_matches_full_forward_exactly(mode, n):
+    # Whole-matrix scales come from the prompt's first rows and carry over to every later
+    # token, so cached decoding after a prompt that covers the sample is exact.
+    P = export(tiny_model(), IntSpec(scales=mode, scale_n=n))
+    x = batches(1)[0][:, :14]
     full, _ = int_engine.forward(P, x)
-    logits, caches = int_engine.forward(P, x[:, :5])
+    logits, caches = int_engine.forward(P, x[:, :8])
     steps = [logits]
-    for i in range(5, 12):
+    for i in range(8, 14):
         logits, caches = int_engine.forward(P, x[:, i : i + 1], caches)
         steps.append(logits)
     assert torch.equal(torch.cat(steps, dim=1), full)

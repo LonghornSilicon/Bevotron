@@ -56,29 +56,43 @@ Each matrix takes its scale from part of itself, times a headroom factor learned
 (`quant/hybrid.py`, branch `feature/hybrid-scales`). All rows are W4A4KV4 QAT, on the first
 128 validation windows.
 
-Whole-matrix modes (first row, first N values of the matrix, first tile) set one scale for
-every row of a matrix. Scoring runs whole 512-token sequences, but text generation runs one
-token at a time, so each new token takes its scale from its own row. The generation column
-scores each model quantized that way. Per-row modes are the same both ways.
+Whole-matrix modes (first row, first N values of the matrix, first tile) set one scale per
+matrix from the first rows of the sequence. Text generation runs one token at a time, so the
+model keeps that scale from the prompt's first rows and reuses it for every later token
+(`ScaleMemory` in `quant/hybrid.py`, carried in the integer engine's cache too). Rows that
+arrive before an N x N tile is full add to its max. Per-row modes need no memory. The
+generation column decodes every window token by token after a 16-token prompt, with the KV
+cache, and scores every prediction.
 
 | Run | Scale from | Integer, whole sequence | **Float, generation** | Full-split val loss | Largest accumulator |
 |---|---|---|---|---|---|
 | `cd276db15a` | Static (above) | 3.98 | **3.97** | 1.667 | 9,280 |
-| `2d7a069f56` | First row | 3.68 | **3.61** | 1.606 | 17,003 |
-| `ee2f2ec9f2` | First 8 values of the matrix | 3.71 | **4.30** | 1.591 | 13,599 |
-| `9a05eb501f` | First 16 values of the matrix | 3.72 | **4.27** | 1.591 | 15,606 |
-| `a717e92627` | First 64 values of the matrix | 3.73 | **4.43** | 1.601 | 19,183 |
-| `65d98719b6` | First 128 values of the matrix | 3.63 | **3.89** | 1.573 | 17,480 |
-| `64917039df` | First 8x8 tile | 3.62 | **5.51** | 1.567 | 15,729 |
-| `b918baa448` | First 16x16 tile | 3.48 | **5.13** | 1.531 | 19,792 |
+| `2d7a069f56` | First row | 3.68 | **3.74** | 1.606 | 17,003 |
+| `ee2f2ec9f2` | First 8 values of the matrix | 3.71 | **3.69** | 1.591 | 13,599 |
+| `9a05eb501f` | First 16 values of the matrix | 3.72 | **3.68** | 1.591 | 15,606 |
+| `a717e92627` | First 64 values of the matrix | 3.73 | **3.73** | 1.601 | 19,183 |
+| `65d98719b6` | First 128 values of the matrix | 3.63 | **3.63** | 1.573 | 17,480 |
+| `64917039df` | First 8x8 tile | 3.62 | **3.60** | 1.567 | 15,729 |
+| `b918baa448` | First 16x16 tile | 3.48 | **3.47** | 1.531 | 19,792 |
 | `d33add49d3` | Each row's first 8 values | 3.76 | **3.72** | 1.595 | 18,971 |
 | `634e1145be` | Each row's first 16 values | 3.66 | **3.63** | 1.580 | 17,344 |
 | `38099ca695` | Each row's first 64 values | 3.47 | **3.47** | 1.533 | 24,546 |
-| `9e0f9f50a4` | Each row's first 128 values | 3.44 | **3.44** | 1.520 | 28,168 |
+| `9e0f9f50a4` | Each row's first 128 values | 3.44 | **3.43** | 1.520 | 28,168 |
 
-Integer runs use int16 accumulators. For generating text, each row's first 128 values is the
-best option (3.44, ahead of per-token dynamic at 3.52). Tiles and first-N-of-the-matrix lose
-to static during generation, although they look better on whole sequences.
+Integer runs use int16 accumulators. With the scale carried, generation scores the same as a
+whole sequence: identical in float64, within 0.01 in float32, and the integer engine's cached
+decoding is bit-exact with its whole-sequence forward (`tests/test_int_engine.py`). A 1-token
+prompt, where the tile fills in during generation, moves no result by more than 0.01.
+
+For generating text, each row's first 128 values is the best option (3.43, ahead of
+per-token dynamic at 3.52). The 16x16 tile is close behind (3.47) with one scale per matrix
+instead of one per token, and both tiles beat first-N-of-the-matrix. Every sampled mode
+beats static (3.97).
+
+An earlier version of this table gave each generated token a scale from its own row instead
+of the first rows' scale. That did not match training and made the tiles and
+first-N-of-the-matrix look worse than static (5.51 for the 8x8 tile, 4.30 for the first 8
+values).
 
 ## Reproduce
 

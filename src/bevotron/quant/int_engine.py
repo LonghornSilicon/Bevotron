@@ -17,6 +17,8 @@ inference time:
               is a runtime integer a, codes are round(x * qmax / (a * margin)) by integer
               division, and the consumer multiplies its accumulator by a before its
               static requantization. Cached keys and values keep a per row.
+              Cached generation carries each whole-matrix a across steps (the
+              sequence's first rows set it), the last entry of every layer's cache.
 
 quant.int_export builds the integer model (the only place floats appear, once, offline).
 tests/test_int_engine.py runs this forward pass under a mode that fails on any
@@ -36,7 +38,7 @@ from __future__ import annotations
 
 import torch
 
-from bevotron.quant.hybrid import sample_max
+from bevotron.quant.hybrid import ScaleMemory, carried_max, sample_max
 
 INT32 = torch.int32
 
@@ -105,26 +107,37 @@ def linear(x: torch.Tensor, p: dict, acc_bits: int, stats: dict | None, key: str
     return requant(acc, p["m"], p["s"], p["lo"], p["hi"])
 
 
-def quant_sampled(x: torch.Tensor, mode: str, n: int, mm, mbits: int, lo: int, hi: int):
+def quant_sampled(
+    x: torch.Tensor,
+    mode: str,
+    n: int,
+    mm,
+    mbits: int,
+    lo: int,
+    hi: int,
+    memory: ScaleMemory | None = None,
+    key: str = "",
+):
     """x (..., T, C) int16 holding values -> (codes, a). a is the max |value| of the
     sample (row 0, row 0's first n values, the top-left n x n tile, or each row's first n),
-    kept (..., 1, 1) or (..., T, 1). codes = round(x * hi / (a * mm / 2^mbits)), clamped:
-    one integer division per value, no float."""
-    a = sample_max(x, mode, n).clamp(min=1)
+    kept (..., 1, 1) or (..., T, 1), and carried across the calls of a sequence when a
+    memory is given (quant.hybrid.carried_max). codes = round(x * hi / (a * mm / 2^mbits)),
+    clamped: one integer division per value, no float."""
+    a = sample_max(x, mode, n) if memory is None else carried_max(x, mode, n, memory, key)
+    a = a.clamp(min=1)
     den = a * mm
     num = torch.bitwise_left_shift(x.abs() * hi, mbits + 1) + den
     q = torch.div(num, 2 * den, rounding_mode="floor")  # nearest, halves away from zero
     return (q * x.sign()).clamp(lo, hi), a
 
 
-def act_in(x: torch.Tensor, p: dict, c: dict):
+def act_in(x: torch.Tensor, p: dict, c: dict, memory: ScaleMemory | None = None, key=""):
     """A Linear's input codes and runtime factor: as written (static, a = None), or
     sampled from the int16 holding values."""
     if c["mode"] is None:
         return x, None
-    return quant_sampled(
-        x, c["mode"], c["scale_n"], p["mm"], c["margin_bits"], c["a_lo"], c["a_hi"]
-    )
+    mode, n = c["mode"], c["scale_n"]
+    return quant_sampled(x, mode, n, p["mm"], c["margin_bits"], c["a_lo"], c["a_hi"], memory, key)
 
 
 def isqrt(v: torch.Tensor) -> torch.Tensor:
@@ -188,7 +201,9 @@ def attention(q, k, v, ak, av, L: dict, P: dict, stats: dict | None, window: int
 
 
 def forward(P: dict, idx: torch.Tensor, caches=None, stats: dict | None = None):
-    """idx (B,T) int64 token ids -> (logits (B,T,V) int64 at the logit scale, caches)."""
+    """idx (B,T) int64 token ids -> (logits (B,T,V) int64 at the logit scale, caches).
+    Each layer's cache is (k, v, ak, av, memory): memory holds the sampled maxima carried
+    across calls, one object shared by every layer."""
     c, meta = P["consts"], P["meta"]
     acc = c["acc_bits"]
     r_lo, r_hi = c["res_lo"], c["res_hi"]
@@ -197,6 +212,7 @@ def forward(P: dict, idx: torch.Tensor, caches=None, stats: dict | None = None):
     in_lo, in_hi, mode = c["in_lo"], c["in_hi"], c["mode"]
     b, t = idx.shape
     offset = 0 if caches is None else caches[0][0].shape[2]
+    memory = ScaleMemory() if caches is None else caches[0][4]
 
     emb = P["emb"]
     r = requant(emb["q"][idx], emb["m"][idx][..., None], emb["s"][idx][..., None], r_lo, r_hi)
@@ -209,7 +225,10 @@ def forward(P: dict, idx: torch.Tensor, caches=None, stats: dict | None = None):
     for i, L in enumerate(P["layers"]):
         h = layernorm(r, L["ln1"], frac, std_bits)
         to = L["ln1"]["to"]
-        x = {n: act_in(requant(h, *to[n], in_lo, in_hi), L[n], c) for n in ("q", "k", "v")}
+        x = {
+            n: act_in(requant(h, *to[n], in_lo, in_hi), L[n], c, memory, f"{i}.{n}")
+            for n in ("q", "k", "v")
+        }
         q = linear(x["q"][0], L["q"], acc, stats, "q", x["q"][1])
         q = q.view(b, t, n_head, hd).transpose(1, 2)
         kv = []
@@ -218,7 +237,10 @@ def forward(P: dict, idx: torch.Tensor, caches=None, stats: dict | None = None):
             a = None
             if mode is not None:  # sampled per head, the factor kept for every cached row
                 lo, hi = c["kv_lo"], c["kv_hi"]
-                y, a = quant_sampled(y, mode, c["scale_n"], L[f"{n}_mm"], c["margin_bits"], lo, hi)
+                mm, key = L[f"{n}_mm"], f"{i}.{n}_cache"
+                y, a = quant_sampled(
+                    y, mode, c["scale_n"], mm, c["margin_bits"], lo, hi, memory, key
+                )
                 a = a.expand(b, n_kv, t, 1)
             kv += [y, a]
         k, ak, v, av = kv
@@ -228,28 +250,31 @@ def forward(P: dict, idx: torch.Tensor, caches=None, stats: dict | None = None):
             if mode is not None:
                 ak = torch.cat((caches[i][2], ak), dim=2)
                 av = torch.cat((caches[i][3], av), dim=2)
-        new_caches.append((k, v, ak, av))
+        new_caches.append((k, v, ak, av, memory))
         if n_kv != n_head:
             rep = n_head // n_kv
             k, v = k.repeat_interleave(rep, dim=1), v.repeat_interleave(rep, dim=1)
             if mode is not None:
                 ak, av = ak.repeat_interleave(rep, dim=1), av.repeat_interleave(rep, dim=1)
         window = meta["layer_windows"][i]
-        x_o, a_o = act_in(attention(q, k, v, ak, av, L, P, stats, window), L["o"], c)
+        y = attention(q, k, v, ak, av, L, P, stats, window)
+        x_o, a_o = act_in(y, L["o"], c, memory, f"{i}.o")
         o = linear(x_o, L["o"], acc, stats, "o", a_o)
         r = (r + requant(o, *L["res_attn"], r_lo, r_hi)).clamp(r_lo, r_hi)
 
         h = layernorm(r, L["ln2"], frac, std_bits)
-        x_up, a_up = act_in(requant(h, *L["ln2"]["to"]["up"], in_lo, in_hi), L["up"], c)
+        h = requant(h, *L["ln2"]["to"]["up"], in_lo, in_hi)
+        x_up, a_up = act_in(h, L["up"], c, memory, f"{i}.up")
         u = linear(x_up, L["up"], acc, stats, "up", a_up)
-        x_dn, a_dn = act_in(L["gelu_lut"][u - L["up"]["lo"]], L["down"], c)
+        x_dn, a_dn = act_in(L["gelu_lut"][u - L["up"]["lo"]], L["down"], c, memory, f"{i}.down")
         dn = linear(x_dn, L["down"], acc, stats, "down", a_dn)
         r = (r + requant(dn, *L["res_mlp"], r_lo, r_hi)).clamp(r_lo, r_hi)
         if stats is not None:
             stats["residual"] = max(stats.get("residual", 0), int(r.abs().max()))
 
     h = layernorm(r, P["lnf"], frac, std_bits)
-    x, a = act_in(requant(h, *P["lnf"]["to"]["head"], in_lo, in_hi), P["head"], c)
+    h = requant(h, *P["lnf"]["to"]["head"], in_lo, in_hi)
+    x, a = act_in(h, P["head"], c, memory, "head")
     return linear(x, P["head"], acc, stats, "head", a), new_caches
 
 

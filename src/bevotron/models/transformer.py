@@ -47,6 +47,8 @@ class Bevo(nn.Module):
         self.lm_head = nn.Linear(m.d_model, vocab, bias=False)
         if m.tie_embeddings:
             self.lm_head.weight = self.wte.weight
+        # set by quant.ptq for sampled scales: maxima carried across cached-generation calls
+        self.scale_memory: dict | None = None
         self.apply(self._init_weights)
         for name, p in self.named_parameters():  # GPT-2 residual scaling
             if name.endswith(("o_proj.weight", "down.weight")):
@@ -66,6 +68,8 @@ class Bevo(nn.Module):
 
     def forward(self, idx: torch.Tensor, targets: torch.Tensor | None = None, caches=None):
         """idx: (B, T) token ids. Returns (logits, loss, caches); loss is None without targets."""
+        if caches is None and self.scale_memory is not None:
+            self.scale_memory.clear()  # a new sequence: its first rows set the sampled scales
         x = self.wte(idx)
         offset = 0 if caches is None else caches[0][0].size(2)
         if self.positions is not None:

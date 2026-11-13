@@ -10,6 +10,8 @@ torch = pytest.importorskip("torch")
 from bevotron.config import RunConfig, apply_overrides, load_raw  # noqa: E402
 from bevotron.models import Bevo  # noqa: E402
 from bevotron.quant.hybrid import (  # noqa: E402
+    ScaleMemory,
+    carried_max,
     fake_quantize_sampled,
     sample,
     sample_max,
@@ -127,3 +129,45 @@ def test_sampled_qat_learns_margins_and_ptq_reproduces_it():
             apply_ptq(plain.eval(), "w4a4kv4", saved, sampling)
             ptq_logits, _, _ = plain(x)
         assert torch.allclose(qat_logits, ptq_logits, atol=1e-5)
+
+
+def test_carried_max_keeps_the_first_rows_sample_across_calls():
+    x = torch.randn(2, 3, 10, 6)  # (B, H, T, C)
+    for mode, n in (("first_row", 0), ("first_n", 2), ("first_tile", 4)):
+        whole = sample_max(x, mode, n)
+        memory = ScaleMemory()
+        assert torch.equal(carried_max(x[..., :5, :], mode, n, memory, "k"), whole)
+        for t in range(5, 10):  # one row per call: the first rows' max, not the row's own
+            assert torch.equal(carried_max(x[..., t : t + 1, :], mode, n, memory, "k"), whole)
+        assert memory["k"][0] == 10
+    memory = ScaleMemory()  # a prompt shorter than the tile: rows 0..3 build the max
+    got = [carried_max(x[..., t : t + 1, :], "first_tile", 4, memory, "k") for t in range(6)]
+    for t in range(6):
+        assert torch.equal(got[t], sample_max(x[..., : min(t, 3) + 1, :], "first_tile", 4))
+    per_row = carried_max(x, "row_first_n", 2, ScaleMemory(), "k")
+    assert torch.equal(per_row, sample_max(x, "row_first_n", 2))  # needs no memory
+
+
+@pytest.mark.parametrize("mode,n", [("first_row", 128), ("first_n", 4), ("first_tile", 4)])
+def test_cached_generation_matches_the_whole_sequence(mode, n):
+    """Token-by-token decoding after a prompt that covers the sample gives the logits of
+    one whole-sequence call: every token uses the first rows' scale either way."""
+    cfg = tiny()
+    torch.manual_seed(0)
+    model = Bevo(cfg).double().eval()
+    _, a_bits, kv_bits = SCHEME_BITS["w4a4kv4"]
+    margins = start_margins(model, 1.25, a_bits, kv_bits)
+    apply_ptq(model, "w4a4kv4", {k: v.double() for k, v in margins.items()}, (mode, n))
+    idx = torch.randint(
+        0, cfg.tokenizer.vocab_size, (2, 20), generator=torch.Generator().manual_seed(1)
+    )
+    prompt = 6
+    with torch.no_grad():
+        whole, _, _ = model(idx)
+        logits, _, caches = model(idx[:, :prompt])
+        steps = [logits[:, -1]]
+        for t in range(prompt, 19):
+            logits, _, caches = model(idx[:, t : t + 1], caches=caches)
+            steps.append(logits[:, -1])
+    decoded = torch.stack(steps, dim=1)
+    assert torch.allclose(decoded, whole[:, prompt - 1 : 19], atol=1e-9)

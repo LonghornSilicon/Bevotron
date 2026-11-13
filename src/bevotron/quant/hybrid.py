@@ -28,9 +28,12 @@ static scales, and stored as a natural log:
   <attention>.kv_quant.v_log_margin  (1, kv_heads, 1, 1)
 
 Each call samples its own matrix. In training and evaluation a call is a whole sequence,
-so first_row means token 0. In cached generation every new token is a one-row matrix and
-gets its own scale (for first_tile, from its first N values); cached keys and values keep
-the scale they were written with.
+so first_row means token 0. Cached generation feeds one token per call, so a quantized
+model carries each whole-matrix scale across calls (ScaleMemory): the sequence's first
+rows set it, as in a whole-sequence call, and every later token reuses it, the way a chip
+keeps one scale per matrix. Rows that arrive before the sample is complete (a prompt
+shorter than the N x N tile) add to the max. row_first_n needs no memory. Cached keys and
+values keep the scale they were written with.
 """
 
 from __future__ import annotations
@@ -65,29 +68,78 @@ def sample_max(x: torch.Tensor, mode: str, n: int) -> torch.Tensor:
     return m if mode == "row_first_n" else m.amax(dim=-2, keepdim=True)
 
 
+def sample_rows(mode: str, n: int) -> int:
+    """How many leading rows (tokens) of a sequence a whole-matrix mode samples."""
+    return n if mode == "first_tile" else 1
+
+
+class ScaleMemory(dict):
+    """Sampled maxima carried across the calls of one sequence, for cached generation:
+    key -> (rows seen so far, max of the sample so far). Bevo.forward clears it at the
+    start of every sequence (a call without caches)."""
+
+
+def carried_max(x: torch.Tensor, mode: str, n: int, memory: ScaleMemory, key: str):
+    """sample_max for one call of a sequence that may continue earlier calls. The call that
+    starts a sequence gets exactly sample_max(x); later calls reuse that max, adding only
+    rows that still fall inside the sample (rows 0..N-1 for first_tile)."""
+    if mode == "row_first_n":
+        return sample_max(x, mode, n)
+    rows = sample_rows(mode, n)
+    seen, amax = memory.get(key, (0, None))
+    if seen < rows:
+        part = sample_max(x[..., : rows - seen, :], mode, n)
+        amax = part if amax is None else torch.maximum(amax, part)
+    memory[key] = (seen + x.shape[-2], amax)
+    return amax
+
+
 def fake_quantize_sampled(
-    x: torch.Tensor, bits: int, mode: str, n: int, log_margin: torch.Tensor
+    x: torch.Tensor,
+    bits: int,
+    mode: str,
+    n: int,
+    log_margin: torch.Tensor,
+    memory: ScaleMemory | None = None,
+    key: str = "",
 ) -> torch.Tensor:
     """Scale = max|sample| * exp(log_margin) / qmax, broadcast over the matrix (first_row,
     first_n, first_tile) or kept per row (row_first_n). Straight-through for x, LSQ for the
-    margin; the sampled max itself is not differentiated (as with dynamic scales)."""
-    amax = sample_max(x.detach(), mode, n).clamp(min=1e-8)
-    return fake_quantize_static(x, bits, (amax / qmax(bits)).log() + log_margin)
+    margin; the sampled max itself is not differentiated (as with dynamic scales). With a
+    memory, the max is carried across the calls of a sequence (carried_max)."""
+    xd = x.detach()
+    amax = sample_max(xd, mode, n) if memory is None else carried_max(xd, mode, n, memory, key)
+    return fake_quantize_static(x, bits, (amax.clamp(min=1e-8) / qmax(bits)).log() + log_margin)
 
 
 class SampledKV(nn.Module):
     """Sampled scales for the cached keys and values, one learned margin per head."""
 
-    def __init__(self, bits: int, mode: str, n: int, k_log_margin, v_log_margin):
+    def __init__(
+        self,
+        bits: int,
+        mode: str,
+        n: int,
+        k_log_margin,
+        v_log_margin,
+        memory: ScaleMemory | None = None,
+        key: str = "",
+    ):
         super().__init__()
         self.bits, self.mode, self.n = bits, mode, n
+        self.memory, self.key = memory, key
         self.k_log_margin = nn.Parameter(k_log_margin.detach().clone())
         self.v_log_margin = nn.Parameter(v_log_margin.detach().clone())
 
     def forward(self, k: torch.Tensor, v: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        mem, key = self.memory, self.key
         return (
-            fake_quantize_sampled(k, self.bits, self.mode, self.n, self.k_log_margin),
-            fake_quantize_sampled(v, self.bits, self.mode, self.n, self.v_log_margin),
+            fake_quantize_sampled(
+                k, self.bits, self.mode, self.n, self.k_log_margin, mem, f"{key}.k"
+            ),
+            fake_quantize_sampled(
+                v, self.bits, self.mode, self.n, self.v_log_margin, mem, f"{key}.v"
+            ),
         )
 
 

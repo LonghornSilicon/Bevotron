@@ -18,7 +18,13 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-from bevotron.quant.hybrid import SampledKV, fake_quantize_sampled, sampling_of, start_margins
+from bevotron.quant.hybrid import (
+    SampledKV,
+    ScaleMemory,
+    fake_quantize_sampled,
+    sampling_of,
+    start_margins,
+)
 from bevotron.quant.static import StaticKV, calibrate, calibration_batches, fake_quantize_static
 
 # scheme -> bits for (weights, activations, KV cache); None = leave in float
@@ -50,8 +56,12 @@ def apply_ptq(
     """Quantize a trained model in place according to `scheme`. With `scales` (log scales
     from QAT or calibration, see quant.static) activations and the KV cache use those fixed
     scales; without, every token gets its own. With `sampling` = (mode, n), `scales` holds
-    log margins and each matrix's scale is sampled from it (quant.hybrid)."""
+    log margins and each matrix's scale is sampled from it (quant.hybrid), carried across
+    the calls of one sequence so cached generation reuses the first rows' scale."""
     w_bits, a_bits, kv_bits = SCHEME_BITS[scheme]
+    memory = None
+    if sampling is not None:
+        memory = model.scale_memory = ScaleMemory()
     for name, module in model.named_modules():
         if isinstance(module, nn.Linear) and module.weight.dim() == 2:
             if w_bits is not None:
@@ -63,7 +73,7 @@ def apply_ptq(
                 elif sampling is not None:
                     margin = scales[f"{name}.act_log_margin"].to(module.weight.device)
                     module.register_forward_pre_hook(
-                        _sampled_activation_hook(a_bits, sampling, margin)
+                        _sampled_activation_hook(a_bits, sampling, margin, memory, name)
                     )
                 else:
                     log_scale = scales[f"{name}.act_log_scale"].to(module.weight.device)
@@ -81,6 +91,8 @@ def apply_ptq(
                     *sampling,
                     scales[f"{name}.kv_quant.k_log_margin"].to(device),
                     scales[f"{name}.kv_quant.v_log_margin"].to(device),
+                    memory,
+                    name,
                 ).requires_grad_(False)
             else:
                 device = next(module.parameters()).device
@@ -120,9 +132,11 @@ def _activation_hook(bits: int):
     return hook
 
 
-def _sampled_activation_hook(bits: int, sampling: tuple, log_margin: torch.Tensor):
+def _sampled_activation_hook(
+    bits: int, sampling: tuple, log_margin: torch.Tensor, memory: ScaleMemory, key: str
+):
     def hook(_module, inputs):
-        x = fake_quantize_sampled(inputs[0], bits, *sampling, log_margin)
+        x = fake_quantize_sampled(inputs[0], bits, *sampling, log_margin, memory, key)
         return (x,) + tuple(inputs[1:])
 
     return hook
