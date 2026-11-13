@@ -11,8 +11,7 @@ stay coherent.
   4 bits.
 - **Static scales:** one fixed scale per Linear input and one per KV-cache head, so no scale
   is computed at inference.
-  - **Calibration:** each scale starts at the 99.99th percentile of absolute values over 128
-    training windows (8 batches of 16, seed 0).
+  - **Calibration:** at each spot, take the 99.99th percentile of |x| over 128 training windows (8 batches of 16, seed 0). The scale is that value / 7 for 4-bit (/ 127 for 8-bit), so anything above the percentile gets clipped.
   - **QAT:** 50M tokens of fine-tuning from the baseline. The scales are learned along with
     the weights (stored as log scales, LSQ gradient, 10x learning rate, no weight decay).
 - **Weights:** 4 bits, one scale per output channel.
